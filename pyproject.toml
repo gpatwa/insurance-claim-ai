@@ -30,6 +30,9 @@ llm = [
 agent = [
     "langgraph>=0.2",
 ]
+bus = [
+    "aiokafka>=0.11",
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

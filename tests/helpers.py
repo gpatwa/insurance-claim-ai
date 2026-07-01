@@ -6,6 +6,7 @@ from temporalio.worker import Worker
 
 from claimpipe.adapters.object_store import InMemoryObjectStore
 from claimpipe.adapters.ocr import MockOCRClient
+from claimpipe.eventstore import EventStore
 from claimpipe.temporal.activities import ClaimActivities, ping
 from claimpipe.temporal.workflows import ClaimWorkflow, PingWorkflow
 
@@ -18,15 +19,17 @@ META = {
 }
 
 
-def make_worker(env, repo, store: InMemoryObjectStore | None = None, ocr=None) -> Worker:
+def make_worker(
+    env, store: EventStore, obj_store: InMemoryObjectStore | None = None, ocr=None
+) -> Worker:
     acts = ClaimActivities(
-        repo,
-        object_store=store or InMemoryObjectStore(),
+        store,
+        object_store=obj_store or InMemoryObjectStore(),
         ocr=ocr or MockOCRClient(),
     )
     return Worker(
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[ClaimWorkflow, PingWorkflow],
-        activities=[ping, acts.log_metadata, acts.set_status, acts.run_ocr],
+        activities=[ping, acts.record_event, acts.run_ocr],
     )

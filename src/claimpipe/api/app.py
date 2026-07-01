@@ -1,7 +1,7 @@
 """FastAPI ingestion service.
 
-Submission is async: the API validates JSON metadata, issues a signed object-store upload URL
-for the PDF, writes the claim record (RECEIVED), starts the durable workflow
+Submission is async and event-sourced: the API validates JSON metadata, appends a
+CLAIM_RECEIVED event (which creates the projection), starts the durable workflow
 (workflow_id = claim_id → dedup/idempotency), and returns 202.
 """
 
@@ -18,19 +18,20 @@ from claimpipe.api.schemas import (
     SubmitClaimResponse,
 )
 from claimpipe.config import Settings
-from claimpipe.domain.models import Claim, ClaimStatus
-from claimpipe.repository import ClaimRepository
+from claimpipe.domain.events import EventType
+from claimpipe.domain.models import ClaimStatus
+from claimpipe.eventstore import EventStore
 from claimpipe.temporal.workflows import ClaimWorkflow
 
 
 def _upload_url(settings: Settings, claim_id: str) -> str:
-    # M1: placeholder. M2 replaces this with a real presigned S3/MinIO PUT URL.
+    # M2: placeholder. Real presigned S3/MinIO PUT URL is a later refinement.
     return f"{settings.s3_endpoint_url}/{settings.s3_bucket}/{claim_id}/source.pdf"
 
 
-def create_app(*, repo: ClaimRepository, temporal_client: Client, settings: Settings) -> FastAPI:
+def create_app(*, store: EventStore, temporal_client: Client, settings: Settings) -> FastAPI:
     app = FastAPI(title="claimpipe ingestion")
-    app.state.repo = repo
+    app.state.store = store
     app.state.temporal_client = temporal_client
     app.state.settings = settings
 
@@ -44,12 +45,12 @@ def create_app(*, repo: ClaimRepository, temporal_client: Client, settings: Sett
         request: Request,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> SubmitClaimResponse:
-        repo: ClaimRepository = request.app.state.repo
+        store: EventStore = request.app.state.store
         client: Client = request.app.state.temporal_client
         settings: Settings = request.app.state.settings
 
         if idempotency_key:
-            existing = await repo.find_by_idempotency_key(idempotency_key)
+            existing = await store.find_by_idempotency_key(idempotency_key)
             if existing is not None:
                 return SubmitClaimResponse(
                     claim_id=existing.claim_id,
@@ -59,17 +60,18 @@ def create_app(*, repo: ClaimRepository, temporal_client: Client, settings: Sett
                 )
 
         claim_id = str(uuid4())
-        claim = Claim(claim_id=claim_id, status=ClaimStatus.RECEIVED, metadata=req.metadata)
-        await repo.create(claim, idempotency_key=idempotency_key)
-
-        # workflow_id = claim_id makes the start idempotent at the Temporal layer too.
+        await store.append(
+            claim_id,
+            EventType.CLAIM_RECEIVED,
+            {"metadata": req.metadata.model_dump()},
+            idempotency_key=idempotency_key,
+        )
         await client.start_workflow(
             ClaimWorkflow.run,
             claim_id,
             id=claim_id,
             task_queue=settings.temporal_task_queue,
         )
-
         return SubmitClaimResponse(
             claim_id=claim_id,
             status=ClaimStatus.RECEIVED,
@@ -78,11 +80,9 @@ def create_app(*, repo: ClaimRepository, temporal_client: Client, settings: Sett
 
     @app.post("/claims/{claim_id}/uploaded", status_code=202)
     async def mark_uploaded(claim_id: str, request: Request) -> dict[str, str]:
-        """Client calls this after PUTting the PDF to the signed URL. Signals the workflow's
-        upload dormancy gate so OCR can proceed."""
         client: Client = request.app.state.temporal_client
-        repo: ClaimRepository = request.app.state.repo
-        if await repo.get(claim_id) is None:
+        store: EventStore = request.app.state.store
+        if await store.get(claim_id) is None:
             raise HTTPException(status_code=404, detail="claim not found")
         handle = client.get_workflow_handle(claim_id)
         await handle.signal(ClaimWorkflow.pdf_uploaded, f"{claim_id}/source.pdf")
@@ -90,8 +90,8 @@ def create_app(*, repo: ClaimRepository, temporal_client: Client, settings: Sett
 
     @app.get("/claims/{claim_id}", response_model=ClaimStatusResponse)
     async def get_claim(claim_id: str, request: Request) -> ClaimStatusResponse:
-        repo: ClaimRepository = request.app.state.repo
-        claim = await repo.get(claim_id)
+        store: EventStore = request.app.state.store
+        claim = await store.get(claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="claim not found")
         return ClaimStatusResponse(claim_id=claim.claim_id, status=claim.status)

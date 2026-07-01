@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # OCR (blackbox)
     ocr_base_url: str = "http://localhost:8080"
 
+    # Message bus (Kafka / Redpanda) — event fan-out transport
+    kafka_bootstrap: str = "localhost:19092"
+    event_topic: str = "claim-events"
+
     # Retention (days) — see design doc
     raw_pdf_retention_days: int = 7
 

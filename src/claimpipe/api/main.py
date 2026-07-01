@@ -1,4 +1,4 @@
-"""Real API entrypoint: builds Postgres repo + Temporal client, serves with uvicorn."""
+"""Real API entrypoint: builds Postgres event store + Temporal client, serves with uvicorn."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from temporalio.client import Client
 
 from claimpipe.api.app import create_app
 from claimpipe.config import get_settings
-from claimpipe.repository import PostgresClaimRepository
+from claimpipe.eventstore import PostgresEventStore
 
 
 async def _build():
@@ -20,7 +20,9 @@ async def _build():
         settings.temporal_address, namespace=settings.temporal_namespace
     )
     pool = await asyncpg.create_pool(settings.postgres_dsn)
-    return create_app(repo=PostgresClaimRepository(pool), temporal_client=client, settings=settings)
+    return create_app(
+        store=PostgresEventStore(pool), temporal_client=client, settings=settings
+    )
 
 
 def main() -> None:

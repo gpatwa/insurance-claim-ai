@@ -8,12 +8,19 @@ Built on a **portable, self-hosted stack** — the same code runs on a laptop an
 
 | Concern | Tech |
 |---|---|
-| Durable orchestration | **Temporal** (self-hosted) |
+| Durable orchestration / decider | **Temporal** (self-hosted) |
+| Source of truth | **event-sourced** append-only `claim_events` (Postgres) |
+| Read models | projections folded from events (status, etc.) |
+| Event bus (fan-out) | **Kafka / Redpanda** via transactional **outbox** + relay |
 | Workers / API | **Python** (`temporalio`, FastAPI) |
 | Object storage | **S3 API** behind an adapter (MinIO local) |
-| Relational store | **Postgres** |
 | LLMs | mix of providers behind one `ModelClient` adapter (Claude via Bedrock/Vertex/API) |
 | Agent reasoning (escalation) | **LangGraph** inside a Temporal activity |
+
+**State model:** the Temporal workflow is the authoritative decider and emits **domain events**;
+`claim_events` is the append-only source of truth; the status enum and other read models are
+**projections** folded from events (transitions validated in one place). Kafka is the fan-out
+**bus** — not the source of truth — fed by a transactional outbox so no event is ever lost.
 
 Design rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -36,6 +43,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M0** — Repo scaffold + local harness (Docker Compose, adapter Protocols, CI, smoke workflow)
 - [x] **M1** — Ingestion API + claim record (FastAPI, idempotent submit, start workflow, status endpoint)
 - [x] **M2** — OCR activity + object storage (upload dormancy gate, retry/backoff, S3 adapter)
+- [x] **M2.5** — Event-sourced foundation (append-only `claim_events`, validated projection, outbox, Kafka/Redpanda bus, relay)
 - [ ] **M3** — LLM tiered routing + persistence
 - [ ] **M4** — Webhook notification (HMAC, retries, DLQ)
 - [ ] **M5** — LangGraph escalation agent
