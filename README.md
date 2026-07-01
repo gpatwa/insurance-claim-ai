@@ -1,16 +1,53 @@
 # claimpipe
 
-Cloud-agnostic **claim-ingestion pipeline**: a PDF + JSON metadata "claim" is logged, run
-through OCR, scored by multiple LLM models (tiered routing), persisted, and the customer is
-notified by webhook.
+[![CI](https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
+![tests](https://img.shields.io/badge/tests-33%20passing-brightgreen.svg)
 
-Built on a **portable, self-hosted stack** — the same code runs on a laptop and on any cloud:
+> **Cloud-agnostic claim-ingestion pipeline.** A PDF + JSON "claim" is logged → run through OCR →
+> scored by multiple LLM models (tiered routing) → persisted → the customer is notified by
+> webhook. Portable, self-hosted, and **event-sourced**.
+
+🌐 **[Landing page](https://gpatwa.github.io/insurance-claim-ai)** · 🧭 [Design](docs/DESIGN.md) · 🚀 [Deploy](docs/DEPLOY.md)
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Cust([Customer])
+    API[FastAPI<br/>ingestion]
+
+    subgraph ORCH[Temporal · decider + state machine]
+      WF[ClaimWorkflow]
+      OCR[OCR activity]
+      LLM[LLM tiered routing]
+      AGENT[LangGraph<br/>review agent]
+    end
+
+    EV[(claim_events<br/>source of truth)]
+    PROJ[(projections<br/>status · model_outputs)]
+    BUS[(Kafka / Redpanda)]
+    NOTIF[Notifier]
+
+    Cust -->|POST /claims + PDF| API
+    API -->|CLAIM_RECEIVED| EV
+    API -->|start| WF
+    WF --> OCR --> LLM
+    LLM -->|escalate| AGENT
+    WF -->|emit events| EV
+    EV --> PROJ
+    EV -->|outbox| BUS --> NOTIF
+    NOTIF -->|HMAC webhook| Cust
+```
+
+## Stack — portable, self-hosted (same code local → any cloud)
 
 | Concern | Tech |
 |---|---|
 | Durable orchestration / decider | **Temporal** (self-hosted) |
 | Source of truth | **event-sourced** append-only `claim_events` (Postgres) |
-| Read models | projections folded from events (status, etc.) |
+| Read models | projections folded from events (status, model_outputs) |
 | Event bus (fan-out) | **Kafka / Redpanda** via transactional **outbox** + relay |
 | Workers / API | **Python** (`temporalio`, FastAPI) |
 | Object storage | **S3 API** behind an adapter (MinIO local) |
@@ -52,11 +89,15 @@ Each milestone is independently end-to-end tested and pushed.
 
 ## Design principles
 
-- **Enum state machine is the single source of truth** — the LLM never drives transitions;
-  it only fills structured fields. The workflow advances `ClaimStatus` deterministically.
-- **Adapters everywhere** — OCR, object store, and LLM providers sit behind Protocols, so
-  swapping cloud/provider is a config change, not a rewrite.
-- **Local/prod parity** — the workflow you debug locally is the workflow that runs in prod.
+- **Event log is the source of truth; status is a projection** — the workflow emits domain
+  events, and read models (the `ClaimStatus` enum, `model_outputs`) are folded from them with
+  transitions validated in one place. The LLM never drives transitions.
+- **Adapters everywhere** — OCR, object store, message bus, and LLM providers sit behind
+  Protocols, so swapping cloud/provider is a config change, not a rewrite.
+- **Event-driven dormancy gates, not polling** — long waits (PDF upload, human review) are
+  Temporal timers/signals resumed via webhook, scale-to-zero while waiting.
+- **Local/prod parity** — the workflow you debug locally is the workflow that runs in prod;
+  CI is fully hermetic (Temporal in-process test env, no Docker).
 
 ## License
 

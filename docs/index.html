@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>claimpipe — cloud-agnostic claim ingestion pipeline</title>
+<meta name="description" content="Portable, self-hosted, event-sourced claim-ingestion pipeline: Temporal + LangGraph + Postgres + Kafka. PDF+JSON claim → OCR → tiered LLM routing → persist → webhook." />
+<style>
+  :root {
+    --bg: #0b1020; --bg2: #131a30; --card: #161d33; --line: #263154;
+    --fg: #e8ecf6; --muted: #9aa6c4; --accent: #6ea8ff; --accent2: #7cf1c8; --chip:#1e2742;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; color: var(--fg); background: var(--bg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+  header.hero {
+    background: radial-gradient(1200px 500px at 70% -10%, #1c2c5a 0%, transparent 60%),
+                linear-gradient(180deg, #0c1226, #0b1020);
+    border-bottom: 1px solid var(--line); padding: 72px 0 56px;
+  }
+  .badges img { height: 20px; margin: 0 6px 6px 0; vertical-align: middle; }
+  h1 { font-size: 44px; margin: 14px 0 6px; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--accent2); }
+  .tag { color: var(--muted); font-size: 19px; max-width: 720px; }
+  .cta { margin-top: 26px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 11px 18px; border-radius: 10px; font-weight: 600;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  }
+  .btn.primary { background: linear-gradient(180deg, #3f6fd6, #2f57b5); border-color: #3f6fd6; color: #fff; }
+  .btn:hover { text-decoration: none; border-color: var(--accent); }
+  section { padding: 46px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 26px; margin: 0 0 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .card .k { color: var(--accent2); font-weight: 700; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; }
+  .chip { background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; color: var(--fg); font-weight: 600; }
+  .arrow { color: var(--accent); }
+  ul.ms { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px,1fr)); gap: 8px; }
+  ul.ms li { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 14.5px; }
+  ul.ms li b { color: var(--accent2); }
+  pre { background: #0a0f1f; border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow:auto; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px; }
+  .mermaid { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  footer { padding: 34px 0 60px; color: var(--muted); font-size: 14px; }
+  .stat { display:inline-block; margin-right: 22px; }
+  .stat b { color: var(--fg); font-size: 20px; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="badges">
+      <a href="https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml"><img src="https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT" />
+      <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12" />
+      <img src="https://img.shields.io/badge/tests-33%20passing-brightgreen.svg" alt="tests" />
+    </div>
+    <h1><span class="accent">claim</span>pipe</h1>
+    <p class="tag">A cloud-agnostic, event-sourced <b>claim-ingestion pipeline</b>. A PDF + JSON
+      claim is logged → run through OCR → scored by multiple LLM models (tiered routing) →
+      persisted → the customer is notified by webhook. Same code on a laptop and on any cloud.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/gpatwa/insurance-claim-ai">View on GitHub →</a>
+      <a class="btn" href="https://github.com/gpatwa/insurance-claim-ai/blob/main/docs/DESIGN.md">Design doc</a>
+      <a class="btn" href="https://github.com/gpatwa/insurance-claim-ai/blob/main/docs/DEPLOY.md">Deploy &amp; portability</a>
+    </div>
+    <div style="margin-top:28px">
+      <span class="stat"><b>8</b> milestones</span>
+      <span class="stat"><b>33</b> hermetic tests</span>
+      <span class="stat"><b>4</b> roles, one image</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Architecture</h2>
+    <pre class="mermaid">
+flowchart LR
+    Cust([Customer])
+    API[FastAPI ingestion]
+    subgraph ORCH[Temporal · decider + state machine]
+      WF[ClaimWorkflow]
+      OCR[OCR activity]
+      LLM[LLM tiered routing]
+      AGENT[LangGraph review agent]
+    end
+    EV[(claim_events source of truth)]
+    PROJ[(projections status · model_outputs)]
+    BUS[(Kafka / Redpanda)]
+    NOTIF[Notifier]
+    Cust -->|POST /claims + PDF| API
+    API -->|CLAIM_RECEIVED| EV
+    API -->|start| WF
+    WF --> OCR --> LLM
+    LLM -->|escalate| AGENT
+    WF -->|emit events| EV
+    EV --> PROJ
+    EV -->|outbox| BUS --> NOTIF
+    NOTIF -->|HMAC webhook| Cust
+    </pre>
+    <p style="color:var(--muted)">The Temporal workflow decides and emits <b>domain events</b>;
+      <code>claim_events</code> is the append-only source of truth; status &amp; model_outputs are
+      <b>projections</b>. Kafka is the fan-out <b>bus</b> (not the record), fed by a transactional
+      outbox so no event is lost.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Pipeline lifecycle</h2>
+    <div class="flow">
+      <span class="chip">RECEIVED</span><span class="arrow">→</span>
+      <span class="chip">OCR_RUNNING</span><span class="arrow">→</span>
+      <span class="chip">OCR_DONE</span><span class="arrow">→</span>
+      <span class="chip">LLM_RUNNING</span><span class="arrow">→</span>
+      <span class="chip">LLM_DONE</span><span class="arrow">→</span>
+      <span class="chip">PERSISTED</span><span class="arrow">→</span>
+      <span class="chip">NOTIFIED</span>
+    </div>
+    <p style="color:var(--muted);margin-top:12px">Transitions are validated in one place; illegal
+      jumps raise. Terminal branches: <code>FAILED</code>, <code>PARTIAL_SUCCESS</code>,
+      <code>NOTIFY_FAILED</code> (with DLQ replay back to <code>NOTIFIED</code>).</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What's inside</h2>
+    <div class="grid">
+      <div class="card"><h3>⏱️ Durable orchestration</h3><p><span class="k">Self-hosted Temporal</span> is the decider &amp; state machine — durable retries, timeouts, and event-driven dormancy gates (no polling).</p></div>
+      <div class="card"><h3>🧾 Event-sourced</h3><p>Append-only <span class="k">claim_events</span> is the source of truth; status &amp; model_outputs are projections folded from it — audit-grade by construction.</p></div>
+      <div class="card"><h3>📡 Kafka fan-out</h3><p>Transactional <span class="k">outbox → relay → Kafka/Redpanda</span> decouples consumers (notifier, analytics) — the bus is the pipe, not the record.</p></div>
+      <div class="card"><h3>🧠 Tiered LLM routing</h3><p>Cost-tier model first; <span class="k">escalate on low confidence</span> or high-value claims. Structured output for schema-guaranteed results.</p></div>
+      <div class="card"><h3>🕸️ LangGraph agent</h3><p>On escalation, a <span class="k">extract → validate → recommend → critic</span> graph runs inside a Temporal activity; a human owns the final call.</p></div>
+      <div class="card"><h3>🔌 Adapters everywhere</h3><p>OCR, object store, message bus, and LLM providers behind <span class="k">Protocols</span> — swap cloud/provider by config, not a rewrite.</p></div>
+      <div class="card"><h3>🚚 One image, four roles</h3><p><span class="k">api / worker / relay / notifier</span> from a single container; Helm chart + Terraform deploy to any Kubernetes.</p></div>
+      <div class="card"><h3>🧪 Hermetic CI</h3><p>33 tests run with Temporal's in-process test env &mdash; <span class="k">no Docker needed</span>. Local = prod parity.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Milestones</h2>
+    <ul class="ms">
+      <li><b>M0</b> — Repo scaffold + local harness</li>
+      <li><b>M1</b> — Ingestion API + claim record (idempotent)</li>
+      <li><b>M2</b> — OCR + object storage (upload dormancy gate)</li>
+      <li><b>M2.5</b> — Event-sourced foundation + Kafka bus</li>
+      <li><b>M3</b> — LLM tiered routing + persistence</li>
+      <li><b>M4</b> — Webhook notification (Kafka consumer)</li>
+      <li><b>M5</b> — LangGraph escalation agent</li>
+      <li><b>M6</b> — Observability + resilience + load</li>
+      <li><b>M7</b> — Cloud deploy (Docker + Helm + Terraform)</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Quickstart</h2>
+    <pre><code>make install   # uv sync (all extras + dev)
+make test      # hermetic tests — no Docker needed
+make up        # Temporal + Postgres + MinIO + Redpanda locally
+make worker    # run the Temporal worker
+make api       # run the ingestion API</code></pre>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Built with Temporal · LangGraph · Postgres · Kafka/Redpanda · FastAPI · Python 3.12 —
+    MIT licensed. <a href="https://github.com/gpatwa/insurance-claim-ai">gpatwa/insurance-claim-ai</a>
+  </div>
+</footer>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', themeVariables: { fontSize: '14px' } });
+</script>
+</body>
+</html>
