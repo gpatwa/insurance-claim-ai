@@ -87,7 +87,12 @@ async def test_e2e_auto_accept_single_prediction() -> None:
         assert len(preds) == 1  # cost tier only
         assert preds[0].model_name == "cost"
         types = [e.type for e in await store.events(cid)]
-        assert types[-3:] == ["LLM_STARTED", "PREDICTIONS_READY", "CLAIM_PERSISTED"]
+        assert types[-4:] == [
+            "LLM_STARTED",
+            "PREDICTIONS_READY",
+            "CLAIM_ADJUDICATED",
+            "CLAIM_PERSISTED",
+        ]
 
 
 async def test_e2e_low_confidence_escalates() -> None:

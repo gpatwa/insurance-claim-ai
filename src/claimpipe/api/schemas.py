@@ -24,3 +24,5 @@ class SubmitClaimResponse(BaseModel):
 class ClaimStatusResponse(BaseModel):
     claim_id: str
     status: ClaimStatus
+    decision: str | None = None
+    reason_codes: list[str] = []

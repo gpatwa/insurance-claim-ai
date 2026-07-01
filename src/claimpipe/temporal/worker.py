@@ -62,7 +62,7 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[PingWorkflow, ClaimWorkflow],
-        activities=[ping, acts.record_event, acts.run_ocr, acts.run_llm],
+        activities=[ping, acts.record_event, acts.run_ocr, acts.run_llm, acts.run_adjudication],
     )
     await worker.run()
 

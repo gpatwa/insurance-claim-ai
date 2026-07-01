@@ -20,7 +20,13 @@ with workflow.unsafe.imports_passed_through():
 
 # Fallback pipeline when no stage list is supplied (backwards compatible with the
 # pre-registry behavior; the API normally pins the claim type's stages at submission).
-DEFAULT_STAGES = [str(Stage.UPLOAD), str(Stage.OCR), str(Stage.LLM), str(Stage.PERSIST)]
+DEFAULT_STAGES = [
+    str(Stage.UPLOAD),
+    str(Stage.OCR),
+    str(Stage.LLM),
+    str(Stage.ADJUDICATE),
+    str(Stage.PERSIST),
+]
 
 _STD_RETRY = RetryPolicy(maximum_attempts=5)
 _OCR_RETRY = RetryPolicy(
@@ -117,6 +123,17 @@ class ClaimWorkflow:
                 retry_policy=_STD_RETRY,
             )
             self._status = str(ClaimStatus.LLM_DONE)
+            return True
+
+        if stage == Stage.ADJUDICATE:
+            # Deterministic rules decide (the event is emitted inside the activity).
+            await workflow.execute_activity_method(
+                ClaimActivities.run_adjudication,
+                claim_id,
+                start_to_close_timeout=timedelta(minutes=1),
+                retry_policy=_STD_RETRY,
+            )
+            self._status = str(ClaimStatus.ADJUDICATED)
             return True
 
         if stage == Stage.PERSIST:

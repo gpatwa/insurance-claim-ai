@@ -140,7 +140,12 @@ def create_app(
         claim = await store.get(claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="claim not found")
-        return ClaimStatusResponse(claim_id=claim.claim_id, status=claim.status)
+        return ClaimStatusResponse(
+            claim_id=claim.claim_id,
+            status=claim.status,
+            decision=claim.decision,
+            reason_codes=claim.reason_codes,
+        )
 
     @app.get("/claims/{claim_id}/predictions")
     async def get_predictions(claim_id: str, request: Request) -> dict:

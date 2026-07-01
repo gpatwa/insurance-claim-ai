@@ -12,13 +12,19 @@ from claimpipe.domain.models import Claim, ClaimMetadata, ClaimStatus
 # Legal transitions. Kept intentionally explicit so the machine is auditable and any illegal
 # jump is a loud failure, not silent corruption.
 ALLOWED: dict[ClaimStatus, set[ClaimStatus]] = {
-    # RECEIVED may jump straight to PERSISTED for claim types with no document/LLM stages
-    # (pipeline-as-config: stages are per-claim-type data, not code).
-    ClaimStatus.RECEIVED: {ClaimStatus.OCR_RUNNING, ClaimStatus.PERSISTED, ClaimStatus.FAILED},
+    # RECEIVED may jump straight to ADJUDICATED/PERSISTED for claim types with no
+    # document/LLM stages (pipeline-as-config: stages are per-claim-type data, not code).
+    ClaimStatus.RECEIVED: {
+        ClaimStatus.OCR_RUNNING,
+        ClaimStatus.ADJUDICATED,
+        ClaimStatus.PERSISTED,
+        ClaimStatus.FAILED,
+    },
     ClaimStatus.OCR_RUNNING: {ClaimStatus.OCR_DONE, ClaimStatus.FAILED},
     # OCR_DONE may skip LLM for types that only archive documents.
     ClaimStatus.OCR_DONE: {
         ClaimStatus.LLM_RUNNING,
+        ClaimStatus.ADJUDICATED,
         ClaimStatus.PERSISTED,
         ClaimStatus.FAILED,
     },
@@ -27,8 +33,13 @@ ALLOWED: dict[ClaimStatus, set[ClaimStatus]] = {
         ClaimStatus.PARTIAL_SUCCESS,
         ClaimStatus.FAILED,
     },
-    ClaimStatus.LLM_DONE: {ClaimStatus.PERSISTED, ClaimStatus.FAILED},
-    ClaimStatus.PARTIAL_SUCCESS: {ClaimStatus.PERSISTED, ClaimStatus.FAILED},
+    ClaimStatus.LLM_DONE: {ClaimStatus.ADJUDICATED, ClaimStatus.PERSISTED, ClaimStatus.FAILED},
+    ClaimStatus.PARTIAL_SUCCESS: {
+        ClaimStatus.ADJUDICATED,
+        ClaimStatus.PERSISTED,
+        ClaimStatus.FAILED,
+    },
+    ClaimStatus.ADJUDICATED: {ClaimStatus.PERSISTED, ClaimStatus.FAILED},
     ClaimStatus.PERSISTED: {ClaimStatus.NOTIFIED, ClaimStatus.NOTIFY_FAILED},
     # DLQ replay: a failed notification can be retried to success
     ClaimStatus.NOTIFY_FAILED: {ClaimStatus.NOTIFIED},
@@ -41,6 +52,7 @@ _EVENT_STATUS: dict[EventType, ClaimStatus] = {
     EventType.OCR_COMPLETED: ClaimStatus.OCR_DONE,
     EventType.LLM_STARTED: ClaimStatus.LLM_RUNNING,
     EventType.PREDICTIONS_READY: ClaimStatus.LLM_DONE,
+    EventType.CLAIM_ADJUDICATED: ClaimStatus.ADJUDICATED,
     EventType.CLAIM_PERSISTED: ClaimStatus.PERSISTED,
     EventType.CLAIM_NOTIFIED: ClaimStatus.NOTIFIED,
     EventType.CLAIM_FAILED: ClaimStatus.FAILED,
@@ -73,6 +85,10 @@ def project(claim: Claim | None, event: DomainEvent) -> Claim:
 
     if event.type == EventType.OCR_COMPLETED:
         updates["ocr_ref"] = event.payload["ocr_ref"]
+
+    if event.type == EventType.CLAIM_ADJUDICATED:
+        updates["decision"] = event.payload["decision"]
+        updates["reason_codes"] = list(event.payload.get("reason_codes", []))
 
     new_status = _EVENT_STATUS.get(event.type)
     if new_status is not None and new_status != claim.status:

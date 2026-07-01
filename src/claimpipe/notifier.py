@@ -89,6 +89,8 @@ class NotificationService:
         payload = NotificationPayload(
             claim_id=claim.claim_id,
             status=claim.status,
+            decision=claim.decision,
+            reason_codes=claim.reason_codes,
             predictions=preds,
             idempotency_id=idempotency_id,
         )

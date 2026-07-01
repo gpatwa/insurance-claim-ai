@@ -19,6 +19,7 @@ class ClaimStatus(StrEnum):
     OCR_DONE = "OCR_DONE"
     LLM_RUNNING = "LLM_RUNNING"
     LLM_DONE = "LLM_DONE"
+    ADJUDICATED = "ADJUDICATED"
     PERSISTED = "PERSISTED"
     NOTIFIED = "NOTIFIED"
     # terminal / partial
@@ -54,6 +55,9 @@ class Claim(BaseModel):
     metadata: ClaimMetadata
     pdf_ref: str | None = None
     ocr_ref: str | None = None
+    # adjudication outcome (projected from CLAIM_ADJUDICATED)
+    decision: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -74,5 +78,7 @@ class NotificationPayload(BaseModel):
 
     claim_id: str
     status: ClaimStatus
+    decision: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
     predictions: list[ModelPrediction] = Field(default_factory=list)
     idempotency_id: str

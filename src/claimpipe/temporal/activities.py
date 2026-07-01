@@ -14,6 +14,7 @@ from temporalio import activity
 from claimpipe.adapters.model_client import ModelClient
 from claimpipe.adapters.object_store import ObjectStore
 from claimpipe.adapters.ocr import OCRClient
+from claimpipe.adjudication import RuleSet, adjudicate, default_rulesets
 from claimpipe.domain.events import EventType
 from claimpipe.domain.models import ModelPrediction
 from claimpipe.eventstore import EventStore
@@ -41,6 +42,7 @@ class ClaimActivities:
         agent: ClaimReviewAgent | None = None,
         confidence_threshold: float = 0.85,
         high_value_amount: float = 25000.0,
+        rulesets: dict[str, RuleSet] | None = None,
     ) -> None:
         self._store = store
         self._obj = object_store
@@ -50,6 +52,7 @@ class ClaimActivities:
         self._agent = agent
         self._threshold = confidence_threshold
         self._high_value = high_value_amount
+        self._rulesets = rulesets if rulesets is not None else default_rulesets()
 
     @activity.defn
     async def record_event(self, claim_id: str, event_type: str, payload: dict) -> None:
@@ -117,3 +120,39 @@ class ClaimActivities:
             },
         )
         return escalated
+
+    @activity.defn
+    async def run_adjudication(self, claim_id: str) -> str:
+        """Deterministic decision: apply the claim type's versioned rule set to the facts.
+
+        Rules DECIDE; the LLM only prepared the facts. The full (rule set version, facts,
+        matched rule) tuple is recorded on the event — reproducible and audit-grade.
+        Returns the decision string.
+        """
+        claim = await self._store.get(claim_id)
+        assert claim is not None
+
+        preds = await self._store.predictions(claim_id)
+        escalated = False
+        for ev in await self._store.events(claim_id):
+            if ev.type == EventType.PREDICTIONS_READY:
+                escalated = bool(ev.payload.get("escalated", False))
+
+        facts: dict = {
+            **claim.metadata.attributes,
+            "claim_type": claim.metadata.claim_type,
+            "escalated": escalated,
+        }
+        if preds:
+            facts["confidence"] = max(p.confidence for p in preds)
+
+        # No rule set registered for the type → empty set → safe PEND (never auto-approve).
+        rule_set = self._rulesets.get(
+            claim.metadata.claim_type,
+            RuleSet(name=claim.metadata.claim_type, version="unregistered", rules=[]),
+        )
+        result = adjudicate(rule_set, facts)
+        await self._store.append(
+            claim_id, EventType.CLAIM_ADJUDICATED, result.model_dump()
+        )
+        return str(result.decision)

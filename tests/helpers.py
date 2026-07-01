@@ -74,5 +74,5 @@ def make_worker(
         env.client,
         task_queue=TASK_QUEUE,
         workflows=[ClaimWorkflow, PingWorkflow],
-        activities=[ping, acts.record_event, acts.run_ocr, acts.run_llm],
+        activities=[ping, acts.record_event, acts.run_ocr, acts.run_llm, acts.run_adjudication],
     )
