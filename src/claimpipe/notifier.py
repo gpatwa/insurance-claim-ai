@@ -74,16 +74,23 @@ class NotificationService:
     async def handle_event(self, event: DomainEvent) -> None:
         if event.type != EventType.CLAIM_PERSISTED:
             return
-        claim = await self._store.get(event.claim_id)
-        if claim is None:
-            return
+        await self._notify(event.claim_id, idempotency_id=event.event_id)
 
-        preds = await self._store.predictions(event.claim_id)
+    async def retry(self, claim_id: str) -> bool:
+        """DLQ replay: re-attempt delivery for a previously failed claim."""
+        return await self._notify(claim_id, idempotency_id=f"retry-{claim_id}")
+
+    async def _notify(self, claim_id: str, *, idempotency_id: str) -> bool:
+        claim = await self._store.get(claim_id)
+        if claim is None:
+            return False
+
+        preds = await self._store.predictions(claim_id)
         payload = NotificationPayload(
             claim_id=claim.claim_id,
             status=claim.status,
             predictions=preds,
-            idempotency_id=event.event_id,
+            idempotency_id=idempotency_id,
         )
         body = payload.model_dump_json().encode()
         signature = sign(self._secret, body)
@@ -95,18 +102,26 @@ class NotificationService:
                 delivered = True
                 break
             except Exception as exc:  # noqa: BLE001 - deliberately broad: any failure retries
-                log.warning("notify.attempt_failed", attempt=attempt, error=str(exc))
+                log.warning(
+                    "notify.attempt_failed", claim_id=claim_id, attempt=attempt, error=str(exc)
+                )
                 if attempt < self._max_attempts and self._backoff > 0:
                     await asyncio.sleep(self._backoff * attempt)
 
-        if delivered:
-            await self._store.append(
-                claim.claim_id, EventType.CLAIM_NOTIFIED, {"idempotency_id": event.event_id}
-            )
-        else:
-            await self._store.append(
-                claim.claim_id, EventType.NOTIFY_FAILED, {"reason": "delivery_exhausted"}
-            )
+        event_type = EventType.CLAIM_NOTIFIED if delivered else EventType.NOTIFY_FAILED
+        reason = {} if delivered else {"reason": "delivery_exhausted"}
+        await self._store.append(claim_id, event_type, {"idempotency_id": idempotency_id, **reason})
+        return delivered
+
+
+async def replay_failed_notifications(store: EventStore, service: NotificationService) -> int:
+    """Find NOTIFY_FAILED claims and re-attempt delivery. Returns the number recovered."""
+    failed = await store.list_by_status("NOTIFY_FAILED")
+    recovered = 0
+    for claim_id in failed:
+        if await service.retry(claim_id):
+            recovered += 1
+    return recovered
 
 
 async def main() -> None:

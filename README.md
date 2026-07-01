@@ -47,7 +47,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M3** — LLM tiered routing + persistence (cost-tier→confidence-gate→escalate, structured output, `model_outputs` projection)
 - [x] **M4** — Webhook notification (Kafka consumer of CLAIM_PERSISTED, HMAC-signed, retries → NOTIFY_FAILED)
 - [x] **M5** — LangGraph escalation agent (extract→validate→recommend→critic, inside a Temporal activity, on the escalated tier)
-- [ ] **M6** — Observability + resilience + load
+- [x] **M6** — Observability (structured logs per `claim_id`, OTel tracing) + DLQ replay + burst-load + LLM chaos tests
 - [ ] **M7** — Cloud deploy (Terraform + Helm, one target)
 
 ## Design principles

@@ -33,6 +33,10 @@ agent = [
 bus = [
     "aiokafka>=0.11",
 ]
+obs = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

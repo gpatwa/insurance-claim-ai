@@ -36,6 +36,7 @@ class EventStore(Protocol):
     async def find_by_idempotency_key(self, key: str) -> Claim | None: ...
     async def events(self, claim_id: str) -> list[DomainEvent]: ...
     async def predictions(self, claim_id: str) -> list[ModelPrediction]: ...
+    async def list_by_status(self, status: str) -> list[str]: ...
 
     # outbox (read by the relay)
     async def fetch_unpublished(self, limit: int = 100) -> list[DomainEvent]: ...
@@ -91,6 +92,9 @@ class InMemoryEventStore:
 
     async def predictions(self, claim_id: str) -> list[ModelPrediction]:
         return [ModelPrediction(**p) for p in self._predictions.get(claim_id, [])]
+
+    async def list_by_status(self, status: str) -> list[str]:
+        return [cid for cid, c in self._claims.items() if str(c.status) == status]
 
     async def find_by_idempotency_key(self, key: str) -> Claim | None:
         claim_id = self._idem.get(key)
@@ -256,6 +260,11 @@ class PostgresEventStore:
             )
             for r in rows
         ]
+
+    async def list_by_status(self, status: str) -> list[str]:
+        async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
+            rows = await conn.fetch("SELECT claim_id FROM claims WHERE status=$1", status)
+        return [r["claim_id"] for r in rows]
 
     async def fetch_unpublished(self, limit: int = 100) -> list[DomainEvent]:
         async with self._pool.acquire() as conn:  # type: ignore[attr-defined]

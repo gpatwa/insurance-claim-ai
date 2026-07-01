@@ -23,6 +23,8 @@ ALLOWED: dict[ClaimStatus, set[ClaimStatus]] = {
     ClaimStatus.LLM_DONE: {ClaimStatus.PERSISTED, ClaimStatus.FAILED},
     ClaimStatus.PARTIAL_SUCCESS: {ClaimStatus.PERSISTED, ClaimStatus.FAILED},
     ClaimStatus.PERSISTED: {ClaimStatus.NOTIFIED, ClaimStatus.NOTIFY_FAILED},
+    # DLQ replay: a failed notification can be retried to success
+    ClaimStatus.NOTIFY_FAILED: {ClaimStatus.NOTIFIED},
 }
 
 # Events that move the lifecycle status. Events not listed here (e.g. METADATA_LOGGED) update
