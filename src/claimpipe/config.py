@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.85
     high_value_amount: float = 25000.0
 
+    # Webhook notification
+    webhook_hmac_secret: str = "dev-secret-change-me"
+    webhook_max_attempts: int = 5
+    webhook_backoff_seconds: float = 0.5
+
     # Retention (days) — see design doc
     raw_pdf_retention_days: int = 7
 

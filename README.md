@@ -45,7 +45,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M2** — OCR activity + object storage (upload dormancy gate, retry/backoff, S3 adapter)
 - [x] **M2.5** — Event-sourced foundation (append-only `claim_events`, validated projection, outbox, Kafka/Redpanda bus, relay)
 - [x] **M3** — LLM tiered routing + persistence (cost-tier→confidence-gate→escalate, structured output, `model_outputs` projection)
-- [ ] **M4** — Webhook notification (HMAC, retries, DLQ)
+- [x] **M4** — Webhook notification (Kafka consumer of CLAIM_PERSISTED, HMAC-signed, retries → NOTIFY_FAILED)
 - [ ] **M5** — LangGraph escalation agent
 - [ ] **M6** — Observability + resilience + load
 - [ ] **M7** — Cloud deploy (Terraform + Helm, one target)

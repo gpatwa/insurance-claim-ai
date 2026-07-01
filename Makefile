@@ -24,3 +24,12 @@ down:
 
 worker:
 	uv run python -m claimpipe.temporal.worker
+
+relay:
+	uv run python -m claimpipe.relay
+
+notifier:
+	uv run python -m claimpipe.notifier
+
+api:
+	uv run python -m claimpipe.api.main
