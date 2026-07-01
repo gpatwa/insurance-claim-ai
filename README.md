@@ -34,7 +34,7 @@ Temporal Web UI: http://localhost:8233 · MinIO console: http://localhost:9001
 Each milestone is independently end-to-end tested and pushed.
 
 - [x] **M0** — Repo scaffold + local harness (Docker Compose, adapter Protocols, CI, smoke workflow)
-- [ ] **M1** — Ingestion API + claim record (FastAPI, signed upload, start workflow)
+- [x] **M1** — Ingestion API + claim record (FastAPI, idempotent submit, start workflow, status endpoint)
 - [ ] **M2** — OCR activity + object storage
 - [ ] **M3** — LLM tiered routing + persistence
 - [ ] **M4** — Webhook notification (HMAC, retries, DLQ)

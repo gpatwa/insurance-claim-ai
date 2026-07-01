@@ -21,6 +21,7 @@ api = [
 ]
 storage = [
     "aioboto3>=13.0",
+    "asyncpg>=0.29",
 ]
 llm = [
     "anthropic>=0.40",
