@@ -18,6 +18,7 @@ class ClaimRepository(Protocol):
     async def create(self, claim: Claim, idempotency_key: str | None = None) -> None: ...
     async def get(self, claim_id: str) -> Claim | None: ...
     async def set_status(self, claim_id: str, status: ClaimStatus) -> None: ...
+    async def set_ocr_ref(self, claim_id: str, ocr_ref: str) -> None: ...
     async def touch(self, claim_id: str) -> None: ...
     async def find_by_idempotency_key(self, key: str) -> Claim | None: ...
 
@@ -43,6 +44,12 @@ class InMemoryClaimRepository:
     async def set_status(self, claim_id: str, status: ClaimStatus) -> None:
         claim = self._claims[claim_id]
         self._claims[claim_id] = claim.model_copy(update={"status": status, "updated_at": _now()})
+
+    async def set_ocr_ref(self, claim_id: str, ocr_ref: str) -> None:
+        claim = self._claims[claim_id]
+        self._claims[claim_id] = claim.model_copy(
+            update={"ocr_ref": ocr_ref, "updated_at": _now()}
+        )
 
     async def touch(self, claim_id: str) -> None:
         claim = self._claims[claim_id]
@@ -86,6 +93,14 @@ class PostgresClaimRepository:
                 "UPDATE claims SET status=$2, updated_at=now() WHERE claim_id=$1",
                 claim_id,
                 str(status),
+            )
+
+    async def set_ocr_ref(self, claim_id: str, ocr_ref: str) -> None:
+        async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
+            await conn.execute(
+                "UPDATE claims SET ocr_ref=$2, updated_at=now() WHERE claim_id=$1",
+                claim_id,
+                ocr_ref,
             )
 
     async def touch(self, claim_id: str) -> None:

@@ -35,7 +35,7 @@ Each milestone is independently end-to-end tested and pushed.
 
 - [x] **M0** — Repo scaffold + local harness (Docker Compose, adapter Protocols, CI, smoke workflow)
 - [x] **M1** — Ingestion API + claim record (FastAPI, idempotent submit, start workflow, status endpoint)
-- [ ] **M2** — OCR activity + object storage
+- [x] **M2** — OCR activity + object storage (upload dormancy gate, retry/backoff, S3 adapter)
 - [ ] **M3** — LLM tiered routing + persistence
 - [ ] **M4** — Webhook notification (HMAC, retries, DLQ)
 - [ ] **M5** — LangGraph escalation agent

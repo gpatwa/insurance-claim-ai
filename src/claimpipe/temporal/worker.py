@@ -10,6 +10,8 @@ import structlog
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from claimpipe.adapters.object_store import S3ObjectStore
+from claimpipe.adapters.ocr import MockOCRClient
 from claimpipe.config import get_settings
 from claimpipe.repository import PostgresClaimRepository
 from claimpipe.temporal.activities import ClaimActivities, ping
@@ -31,13 +33,21 @@ async def main() -> None:
         settings.temporal_address, namespace=settings.temporal_namespace
     )
     repo = await _build_repo(settings.postgres_dsn)
-    acts = ClaimActivities(repo)
+    store = S3ObjectStore(
+        bucket=settings.s3_bucket,
+        endpoint_url=settings.s3_endpoint_url,
+        region=settings.s3_region,
+        access_key=settings.s3_access_key,
+        secret_key=settings.s3_secret_key,
+    )
+    ocr = MockOCRClient()  # swap for the real blackbox OCR adapter in deployment
+    acts = ClaimActivities(repo, object_store=store, ocr=ocr)
     log.info("worker.starting", task_queue=settings.temporal_task_queue)
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[PingWorkflow, ClaimWorkflow],
-        activities=[ping, acts.log_metadata],
+        activities=[ping, acts.log_metadata, acts.set_status, acts.run_ocr],
     )
     await worker.run()
 

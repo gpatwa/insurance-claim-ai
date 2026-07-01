@@ -76,6 +76,18 @@ def create_app(*, repo: ClaimRepository, temporal_client: Client, settings: Sett
             upload_url=_upload_url(settings, claim_id),
         )
 
+    @app.post("/claims/{claim_id}/uploaded", status_code=202)
+    async def mark_uploaded(claim_id: str, request: Request) -> dict[str, str]:
+        """Client calls this after PUTting the PDF to the signed URL. Signals the workflow's
+        upload dormancy gate so OCR can proceed."""
+        client: Client = request.app.state.temporal_client
+        repo: ClaimRepository = request.app.state.repo
+        if await repo.get(claim_id) is None:
+            raise HTTPException(status_code=404, detail="claim not found")
+        handle = client.get_workflow_handle(claim_id)
+        await handle.signal(ClaimWorkflow.pdf_uploaded, f"{claim_id}/source.pdf")
+        return {"claim_id": claim_id, "signal": "pdf_uploaded"}
+
     @app.get("/claims/{claim_id}", response_model=ClaimStatusResponse)
     async def get_claim(claim_id: str, request: Request) -> ClaimStatusResponse:
         repo: ClaimRepository = request.app.state.repo
