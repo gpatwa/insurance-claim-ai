@@ -17,5 +17,11 @@ uv.lock
 .env
 *.local
 
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+
 # OS
 .DS_Store

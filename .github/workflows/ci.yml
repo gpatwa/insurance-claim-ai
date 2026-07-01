@@ -20,3 +20,19 @@ jobs:
         run: uv run ruff check .
       - name: Test (hermetic — Temporal test env, no Docker)
         run: uv run pytest
+
+  deploy-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: Helm lint
+        run: helm lint charts/claimpipe
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Terraform validate
+        run: |
+          cd deploy/terraform
+          terraform init -backend=false
+          terraform validate

@@ -1,0 +1,51 @@
+{{- range $role, $spec := .Values.roles }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "claimpipe.fullname" $ }}-{{ $role }}
+  labels:
+    {{- include "claimpipe.labels" $ | nindent 4 }}
+    claimpipe/role: {{ $role }}
+spec:
+  replicas: {{ $spec.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "claimpipe.name" $ }}
+      claimpipe/role: {{ $role }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "claimpipe.name" $ }}
+        claimpipe/role: {{ $role }}
+    spec:
+      containers:
+        - name: {{ $role }}
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args: {{ toJson $spec.command }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "claimpipe.fullname" $ }}-config
+            - secretRef:
+                name: {{ include "claimpipe.fullname" $ }}-secret
+          {{- if $spec.port }}
+          ports:
+            - containerPort: {{ $spec.port }}
+          {{- end }}
+{{- if $spec.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "claimpipe.fullname" $ }}-{{ $role }}
+  labels: {{ include "claimpipe.labels" $ | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "claimpipe.name" $ }}
+    claimpipe/role: {{ $role }}
+  ports:
+    - port: {{ $spec.port }}
+      targetPort: {{ $spec.port }}
+{{- end }}
+{{- end }}

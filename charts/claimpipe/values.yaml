@@ -1,0 +1,35 @@
+image:
+  repository: ghcr.io/gpatwa/claimpipe
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# One image, four roles. Scale each independently (per-stage task queues).
+roles:
+  api:
+    replicas: 2
+    command: ["api"]
+    port: 8000
+  worker:
+    replicas: 3
+    command: ["worker"]
+  relay:
+    replicas: 1
+    command: ["relay"]
+  notifier:
+    replicas: 2
+    command: ["notifier"]
+
+# Non-secret config — the ONLY thing that changes between clouds (adapter endpoints).
+config:
+  CLAIMPIPE_TEMPORAL_ADDRESS: "temporal:7233"
+  CLAIMPIPE_POSTGRES_DSN: "postgresql://claimpipe:claimpipe@postgres:5432/claimpipe"
+  CLAIMPIPE_S3_ENDPOINT_URL: "http://minio:9000"
+  CLAIMPIPE_S3_BUCKET: "claims"
+  CLAIMPIPE_KAFKA_BOOTSTRAP: "redpanda:9092"
+  CLAIMPIPE_EVENT_TOPIC: "claim-events"
+
+# Secrets — provide via a real secret manager in production (this is a starter).
+secret:
+  CLAIMPIPE_WEBHOOK_HMAC_SECRET: "change-me"
+  CLAIMPIPE_S3_ACCESS_KEY: "minioadmin"
+  CLAIMPIPE_S3_SECRET_KEY: "minioadmin"

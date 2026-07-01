@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "claimpipe.fullname" . }}-config
+  labels: {{ include "claimpipe.labels" . | nindent 4 }}
+data:
+{{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ $v | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "claimpipe.fullname" . }}-secret
+  labels: {{ include "claimpipe.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+{{- range $k, $v := .Values.secret }}
+  {{ $k }}: {{ $v | quote }}
+{{- end }}
