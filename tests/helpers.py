@@ -27,6 +27,7 @@ def make_worker(
     ocr=None,
     cost_model=None,
     accuracy_model=None,
+    agent=None,
 ) -> Worker:
     acts = ClaimActivities(
         store,
@@ -35,6 +36,7 @@ def make_worker(
         cost_model=cost_model or MockModelClient(name="mock-cost", confidence=0.95),
         accuracy_model=accuracy_model
         or MockModelClient(name="mock-accuracy", version="acc", confidence=0.99),
+        agent=agent,
     )
     return Worker(
         env.client,

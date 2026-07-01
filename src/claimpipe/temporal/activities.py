@@ -7,14 +7,20 @@ event store (append event → inline projection → outbox), never direct status
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from temporalio import activity
 
 from claimpipe.adapters.model_client import ModelClient
 from claimpipe.adapters.object_store import ObjectStore
 from claimpipe.adapters.ocr import OCRClient
 from claimpipe.domain.events import EventType
+from claimpipe.domain.models import ModelPrediction
 from claimpipe.eventstore import EventStore
-from claimpipe.llm import route_and_predict
+from claimpipe.llm import should_escalate
+
+if TYPE_CHECKING:  # avoid importing langgraph into the workflow sandbox
+    from claimpipe.agent import ClaimReviewAgent
 
 
 @activity.defn
@@ -32,6 +38,7 @@ class ClaimActivities:
         ocr: OCRClient | None = None,
         cost_model: ModelClient | None = None,
         accuracy_model: ModelClient | None = None,
+        agent: ClaimReviewAgent | None = None,
         confidence_threshold: float = 0.85,
         high_value_amount: float = 25000.0,
     ) -> None:
@@ -40,6 +47,7 @@ class ClaimActivities:
         self._ocr = ocr
         self._cost_model = cost_model
         self._accuracy_model = accuracy_model
+        self._agent = agent
         self._threshold = confidence_threshold
         self._high_value = high_value_amount
 
@@ -61,8 +69,11 @@ class ClaimActivities:
 
     @activity.defn
     async def run_llm(self, claim_id: str) -> bool:
-        """Design stage C: tiered routing over the OCR text; emit PREDICTIONS_READY. Returns
-        whether the claim was escalated to the accuracy tier."""
+        """Design stage C: tiered routing over the OCR text; emit PREDICTIONS_READY.
+
+        Cost tier runs first. On escalation, the LangGraph review agent runs (if wired);
+        otherwise a plain accuracy-tier model call. Returns whether the claim escalated.
+        """
         assert self._obj is not None
         assert self._cost_model is not None and self._accuracy_model is not None
         claim = await self._store.get(claim_id)
@@ -70,20 +81,39 @@ class ClaimActivities:
         text = (await self._obj.get(f"{claim_id}/ocr.txt")).decode("utf-8")
         claim_value = float(claim.metadata.attributes.get("amount", 0) or 0)
 
-        result = await route_and_predict(
-            self._cost_model,
-            self._accuracy_model,
-            text,
+        cost = await self._cost_model.predict(text)
+        predictions = [cost]
+        escalated = should_escalate(
+            cost,
             threshold=self._threshold,
             claim_value=claim_value,
             high_value_amount=self._high_value,
         )
+        if escalated:
+            if self._agent is not None:
+                review = await self._agent.review(text)
+                predictions.append(
+                    ModelPrediction(
+                        model_name="langgraph-review",
+                        model_version="1",
+                        output={
+                            "recommendation": review.get("recommendation"),
+                            "validation": review.get("validation"),
+                            "critique": review.get("critique"),
+                            "extracted": review.get("extracted"),
+                        },
+                        confidence=float(review.get("confidence", 0.0)),
+                    )
+                )
+            else:
+                predictions.append(await self._accuracy_model.predict(text))
+
         await self._store.append(
             claim_id,
             EventType.PREDICTIONS_READY,
             {
-                "predictions": [p.model_dump() for p in result.predictions],
-                "escalated": result.escalated,
+                "predictions": [p.model_dump() for p in predictions],
+                "escalated": escalated,
             },
         )
-        return result.escalated
+        return escalated

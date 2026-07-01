@@ -46,7 +46,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M2.5** — Event-sourced foundation (append-only `claim_events`, validated projection, outbox, Kafka/Redpanda bus, relay)
 - [x] **M3** — LLM tiered routing + persistence (cost-tier→confidence-gate→escalate, structured output, `model_outputs` projection)
 - [x] **M4** — Webhook notification (Kafka consumer of CLAIM_PERSISTED, HMAC-signed, retries → NOTIFY_FAILED)
-- [ ] **M5** — LangGraph escalation agent
+- [x] **M5** — LangGraph escalation agent (extract→validate→recommend→critic, inside a Temporal activity, on the escalated tier)
 - [ ] **M6** — Observability + resilience + load
 - [ ] **M7** — Cloud deploy (Terraform + Helm, one target)
 

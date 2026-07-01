@@ -44,12 +44,16 @@ async def main() -> None:
     accuracy_model = AnthropicModelClient(
         model="claude-opus-4-8", name="claude-opus-4-8", version="accuracy"
     )
+    from claimpipe.agent import ClaimReviewAgent
+
+    agent = ClaimReviewAgent(extractor=accuracy_model, critic=cost_model)
     acts = ClaimActivities(
         store,
         object_store=obj,
         ocr=ocr,
         cost_model=cost_model,
         accuracy_model=accuracy_model,
+        agent=agent,
         confidence_threshold=settings.confidence_threshold,
         high_value_amount=settings.high_value_amount,
     )
