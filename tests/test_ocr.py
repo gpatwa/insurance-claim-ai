@@ -53,13 +53,13 @@ async def test_ocr_happy_path() -> None:
 
                 claim = await store.get(claim_id)
                 assert claim is not None
-                assert claim.status == ClaimStatus.OCR_DONE
+                assert claim.status == ClaimStatus.PERSISTED  # full pipeline runs to persist
                 assert claim.ocr_ref is not None
                 assert await obj.exists(f"{claim_id}/ocr.txt")
 
-                # event log records the full lifecycle so far
+                # event log records the OCR stages in order
                 types = [e.type for e in await store.events(claim_id)]
-                assert types == [
+                assert types[:4] == [
                     "CLAIM_RECEIVED",
                     "METADATA_LOGGED",
                     "OCR_STARTED",
@@ -85,5 +85,5 @@ async def test_ocr_retries_then_succeeds() -> None:
 
                 claim = await store.get(claim_id)
                 assert claim is not None
-                assert claim.status == ClaimStatus.OCR_DONE
+                assert claim.status == ClaimStatus.PERSISTED
                 assert flaky.calls == 3  # 2 failures + 1 success

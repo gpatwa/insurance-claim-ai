@@ -96,4 +96,12 @@ def create_app(*, store: EventStore, temporal_client: Client, settings: Settings
             raise HTTPException(status_code=404, detail="claim not found")
         return ClaimStatusResponse(claim_id=claim.claim_id, status=claim.status)
 
+    @app.get("/claims/{claim_id}/predictions")
+    async def get_predictions(claim_id: str, request: Request) -> dict:
+        store: EventStore = request.app.state.store
+        if await store.get(claim_id) is None:
+            raise HTTPException(status_code=404, detail="claim not found")
+        preds = await store.predictions(claim_id)
+        return {"claim_id": claim_id, "predictions": [p.model_dump() for p in preds]}
+
     return app

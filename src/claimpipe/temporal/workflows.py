@@ -82,6 +82,21 @@ class ClaimWorkflow:
             retry_policy=_OCR_RETRY,
         )
         self._status = str(ClaimStatus.OCR_DONE)
+
+        # Stage C: LLM tiered routing (emits PREDICTIONS_READY inside the activity).
+        await self._emit(claim_id, EventType.LLM_STARTED)
+        self._status = str(ClaimStatus.LLM_RUNNING)
+        await workflow.execute_activity_method(
+            ClaimActivities.run_llm,
+            claim_id,
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=_STD_RETRY,
+        )
+        self._status = str(ClaimStatus.LLM_DONE)
+
+        # Stage D: persist checkpoint (webhook notification arrives in M4).
+        await self._emit(claim_id, EventType.CLAIM_PERSISTED)
+        self._status = str(ClaimStatus.PERSISTED)
         return claim_id
 
     async def _emit(

@@ -17,7 +17,7 @@ from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 from claimpipe.domain.events import DomainEvent, EventType
-from claimpipe.domain.models import Claim
+from claimpipe.domain.models import Claim, ModelPrediction
 from claimpipe.projection import project
 
 
@@ -35,6 +35,7 @@ class EventStore(Protocol):
     async def get(self, claim_id: str) -> Claim | None: ...
     async def find_by_idempotency_key(self, key: str) -> Claim | None: ...
     async def events(self, claim_id: str) -> list[DomainEvent]: ...
+    async def predictions(self, claim_id: str) -> list[ModelPrediction]: ...
 
     # outbox (read by the relay)
     async def fetch_unpublished(self, limit: int = 100) -> list[DomainEvent]: ...
@@ -54,6 +55,7 @@ class InMemoryEventStore:
         self._seq: dict[str, int] = {}
         self._idem: dict[str, str] = {}
         self._outbox: list[dict] = []
+        self._predictions: dict[str, list[dict]] = {}
 
     async def append(
         self,
@@ -79,11 +81,16 @@ class InMemoryEventStore:
         self._events.setdefault(claim_id, []).append(event)
         if idempotency_key:
             self._idem[idempotency_key] = claim_id
+        if type == EventType.PREDICTIONS_READY:
+            self._predictions[claim_id] = payload["predictions"]
         self._outbox.append({"event": event, "published": False})
         return event
 
     async def get(self, claim_id: str) -> Claim | None:
         return self._claims.get(claim_id)
+
+    async def predictions(self, claim_id: str) -> list[ModelPrediction]:
+        return [ModelPrediction(**p) for p in self._predictions.get(claim_id, [])]
 
     async def find_by_idempotency_key(self, key: str) -> Claim | None:
         claim_id = self._idem.get(key)
@@ -170,6 +177,23 @@ class PostgresEventStore:
                     claim_id,
                     event.model_dump_json(),
                 )
+                if type == EventType.PREDICTIONS_READY:
+                    for p in payload["predictions"]:
+                        await conn.execute(
+                            """INSERT INTO model_outputs (claim_id, model_name, model_version,
+                                                          output, confidence, latency_ms,
+                                                          tokens_cost)
+                               VALUES ($1,$2,$3,$4,$5,$6,$7)
+                               ON CONFLICT (claim_id, model_name, model_version) DO UPDATE
+                               SET output=EXCLUDED.output, confidence=EXCLUDED.confidence""",
+                            claim_id,
+                            p["model_name"],
+                            p["model_version"],
+                            json.dumps(p["output"]),
+                            p["confidence"],
+                            p.get("latency_ms", 0),
+                            p.get("tokens_cost", 0),
+                        )
                 return event
 
     async def _get(self, conn, claim_id: str) -> Claim | None:
@@ -212,6 +236,23 @@ class PostgresEventStore:
                 type=r["type"],
                 payload=json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"],
                 occurred_at=r["occurred_at"],
+            )
+            for r in rows
+        ]
+
+    async def predictions(self, claim_id: str) -> list[ModelPrediction]:
+        async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
+            rows = await conn.fetch(
+                "SELECT * FROM model_outputs WHERE claim_id=$1 ORDER BY model_name", claim_id
+            )
+        return [
+            ModelPrediction(
+                model_name=r["model_name"],
+                model_version=r["model_version"],
+                output=json.loads(r["output"]) if isinstance(r["output"], str) else r["output"],
+                confidence=r["confidence"],
+                latency_ms=r["latency_ms"],
+                tokens_cost=r["tokens_cost"],
             )
             for r in rows
         ]

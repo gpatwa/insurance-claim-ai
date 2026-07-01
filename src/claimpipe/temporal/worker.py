@@ -10,6 +10,7 @@ import structlog
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from claimpipe.adapters.model_client import AnthropicModelClient
 from claimpipe.adapters.object_store import S3ObjectStore
 from claimpipe.adapters.ocr import MockOCRClient
 from claimpipe.config import get_settings
@@ -37,13 +38,27 @@ async def main() -> None:
         secret_key=settings.s3_secret_key,
     )
     ocr = MockOCRClient()  # swap for the real blackbox OCR adapter in deployment
-    acts = ClaimActivities(store, object_store=obj, ocr=ocr)
+    cost_model = AnthropicModelClient(
+        model="claude-haiku-4-5", name="claude-haiku-4-5", version="cost"
+    )
+    accuracy_model = AnthropicModelClient(
+        model="claude-opus-4-8", name="claude-opus-4-8", version="accuracy"
+    )
+    acts = ClaimActivities(
+        store,
+        object_store=obj,
+        ocr=ocr,
+        cost_model=cost_model,
+        accuracy_model=accuracy_model,
+        confidence_threshold=settings.confidence_threshold,
+        high_value_amount=settings.high_value_amount,
+    )
     log.info("worker.starting", task_queue=settings.temporal_task_queue)
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[PingWorkflow, ClaimWorkflow],
-        activities=[ping, acts.record_event, acts.run_ocr],
+        activities=[ping, acts.record_event, acts.run_ocr, acts.run_llm],
     )
     await worker.run()
 

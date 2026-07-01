@@ -44,7 +44,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M1** — Ingestion API + claim record (FastAPI, idempotent submit, start workflow, status endpoint)
 - [x] **M2** — OCR activity + object storage (upload dormancy gate, retry/backoff, S3 adapter)
 - [x] **M2.5** — Event-sourced foundation (append-only `claim_events`, validated projection, outbox, Kafka/Redpanda bus, relay)
-- [ ] **M3** — LLM tiered routing + persistence
+- [x] **M3** — LLM tiered routing + persistence (cost-tier→confidence-gate→escalate, structured output, `model_outputs` projection)
 - [ ] **M4** — Webhook notification (HMAC, retries, DLQ)
 - [ ] **M5** — LangGraph escalation agent
 - [ ] **M6** — Observability + resilience + load

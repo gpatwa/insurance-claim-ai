@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     kafka_bootstrap: str = "localhost:19092"
     event_topic: str = "claim-events"
 
+    # LLM tiered routing (see design doc: cost-tier first, escalate on low confidence)
+    confidence_threshold: float = 0.85
+    high_value_amount: float = 25000.0
+
     # Retention (days) — see design doc
     raw_pdf_retention_days: int = 7
 
