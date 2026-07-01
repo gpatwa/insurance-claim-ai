@@ -35,10 +35,15 @@ TERMINAL_STATUSES = {
 
 
 class ClaimMetadata(BaseModel):
-    """Semi-structured JSON metadata submitted with the claim (~100 KB)."""
+    """Semi-structured JSON metadata submitted with the claim (~100 KB).
+
+    `claim_type` selects a ClaimTypeDef from the registry, which supplies the attribute
+    schema (validated at intake) and the pipeline stages the workflow engine executes.
+    """
 
     customer_id: str = Field(min_length=1)
     callback_url: str = Field(min_length=1, description="Customer webhook endpoint")
+    claim_type: str = "generic-document"
     schema_version: str = "v1"
     attributes: dict[str, object] = Field(default_factory=dict)
 

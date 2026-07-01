@@ -86,6 +86,24 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M5** — LangGraph escalation agent (extract→validate→recommend→critic, inside a Temporal activity, on the escalated tier)
 - [x] **M6** — Observability (structured logs per `claim_id`, OTel tracing) + DLQ replay + burst-load + LLM chaos tests
 - [x] **M7** — Cloud deploy: one image / four roles, Dockerfile, Helm chart, Terraform, deploy docs, CI helm+terraform lint
+- [x] **M8** — Claim-type registry + schema-driven intake (per-type attribute schemas validated at the API edge)
+- [x] **M9** — Pipeline-as-config engine (per-claim-type stage lists; lines of business are configuration, not code)
+
+## Claim types (pipeline-as-config)
+
+A **claim type** declares, as data, the attribute schema its metadata must satisfy and the
+pipeline stages the engine executes — so adding a line of business is registering a
+definition, not writing a workflow. Stage vocabulary: `UPLOAD → OCR → LLM → PERSIST`.
+
+| Seeded type | Stages | Purpose |
+|---|---|---|
+| `generic-document` | UPLOAD → OCR → LLM → PERSIST | full pipeline (default) |
+| `auto-fnol` | UPLOAD → OCR → LLM → PERSIST | demo line with required attribute schema |
+| `archive-document` | UPLOAD → OCR → PERSIST | OCR + store, no model scoring |
+| `metadata-only` | PERSIST | structured-data claim, no document |
+
+The resolved stage list is **pinned into the workflow input at submission** — registry changes
+never affect in-flight claims. Discover types at `GET /claim-types`.
 
 ## Design principles
 

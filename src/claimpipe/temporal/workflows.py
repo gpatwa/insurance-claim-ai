@@ -13,9 +13,14 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from claimpipe.claimtypes import Stage
     from claimpipe.domain.events import EventType
     from claimpipe.domain.models import ClaimStatus
     from claimpipe.temporal.activities import ClaimActivities, ping
+
+# Fallback pipeline when no stage list is supplied (backwards compatible with the
+# pre-registry behavior; the API normally pins the claim type's stages at submission).
+DEFAULT_STAGES = [str(Stage.UPLOAD), str(Stage.OCR), str(Stage.LLM), str(Stage.PERSIST)]
 
 _STD_RETRY = RetryPolicy(maximum_attempts=5)
 _OCR_RETRY = RetryPolicy(
@@ -39,10 +44,11 @@ class PingWorkflow:
 
 @workflow.defn
 class ClaimWorkflow:
-    """Per-claim durable workflow.
+    """Per-claim durable workflow — a generic pipeline ENGINE.
 
-    Stages so far: log metadata (A) → await PDF upload (dormancy gate) → OCR (B).
-    Later milestones append LLM → persist → notify.
+    The stage list comes from the claim type's registry definition (pinned into the workflow
+    input at submission), so lines of business differ by configuration, not by workflow code.
+    Stage vocabulary: UPLOAD (dormancy gate) → OCR → LLM → PERSIST.
     """
 
     def __init__(self) -> None:
@@ -61,43 +67,65 @@ class ClaimWorkflow:
         return self._status
 
     @workflow.run
-    async def run(self, claim_id: str) -> str:
+    async def run(self, claim_id: str, stages: list[str] | None = None) -> str:
+        pipeline = stages or DEFAULT_STAGES
         await self._emit(claim_id, EventType.METADATA_LOGGED)
 
-        # Dormancy gate: wait (durably, scale-to-zero) for the upload-complete signal.
-        try:
-            await workflow.wait_condition(lambda: self._uploaded, timeout=timedelta(days=7))
-        except TimeoutError:
-            await self._emit(claim_id, EventType.CLAIM_FAILED, {"reason": "upload_timeout"})
-            self._status = str(ClaimStatus.FAILED)
-            return claim_id
-        assert self._pdf_key is not None
-
-        await self._emit(claim_id, EventType.OCR_STARTED)
-        self._status = str(ClaimStatus.OCR_RUNNING)
-        await workflow.execute_activity_method(
-            ClaimActivities.run_ocr,
-            args=[claim_id, self._pdf_key],
-            start_to_close_timeout=timedelta(minutes=5),
-            retry_policy=_OCR_RETRY,
-        )
-        self._status = str(ClaimStatus.OCR_DONE)
-
-        # Stage C: LLM tiered routing (emits PREDICTIONS_READY inside the activity).
-        await self._emit(claim_id, EventType.LLM_STARTED)
-        self._status = str(ClaimStatus.LLM_RUNNING)
-        await workflow.execute_activity_method(
-            ClaimActivities.run_llm,
-            claim_id,
-            start_to_close_timeout=timedelta(minutes=10),
-            retry_policy=_STD_RETRY,
-        )
-        self._status = str(ClaimStatus.LLM_DONE)
-
-        # Stage D: persist checkpoint (webhook notification arrives in M4).
-        await self._emit(claim_id, EventType.CLAIM_PERSISTED)
-        self._status = str(ClaimStatus.PERSISTED)
+        for stage in pipeline:
+            done = await self._run_stage(claim_id, stage)
+            if not done:  # stage failed terminally (e.g. upload timeout)
+                return claim_id
         return claim_id
+
+    async def _run_stage(self, claim_id: str, stage: str) -> bool:
+        """Execute one pipeline stage; False means the claim terminated (FAILED)."""
+        if stage == Stage.UPLOAD:
+            # Dormancy gate: wait (durably, scale-to-zero) for the upload-complete signal.
+            try:
+                await workflow.wait_condition(
+                    lambda: self._uploaded, timeout=timedelta(days=7)
+                )
+            except TimeoutError:
+                await self._emit(
+                    claim_id, EventType.CLAIM_FAILED, {"reason": "upload_timeout"}
+                )
+                self._status = str(ClaimStatus.FAILED)
+                return False
+            return True
+
+        if stage == Stage.OCR:
+            assert self._pdf_key is not None, "OCR stage requires UPLOAD before it"
+            await self._emit(claim_id, EventType.OCR_STARTED)
+            self._status = str(ClaimStatus.OCR_RUNNING)
+            await workflow.execute_activity_method(
+                ClaimActivities.run_ocr,
+                args=[claim_id, self._pdf_key],
+                start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=_OCR_RETRY,
+            )
+            self._status = str(ClaimStatus.OCR_DONE)
+            return True
+
+        if stage == Stage.LLM:
+            # Tiered routing (emits PREDICTIONS_READY inside the activity).
+            await self._emit(claim_id, EventType.LLM_STARTED)
+            self._status = str(ClaimStatus.LLM_RUNNING)
+            await workflow.execute_activity_method(
+                ClaimActivities.run_llm,
+                claim_id,
+                start_to_close_timeout=timedelta(minutes=10),
+                retry_policy=_STD_RETRY,
+            )
+            self._status = str(ClaimStatus.LLM_DONE)
+            return True
+
+        if stage == Stage.PERSIST:
+            # Checkpoint: the notifier consumes CLAIM_PERSISTED from the bus.
+            await self._emit(claim_id, EventType.CLAIM_PERSISTED)
+            self._status = str(ClaimStatus.PERSISTED)
+            return True
+
+        raise ValueError(f"unknown pipeline stage: {stage}")
 
     async def _emit(
         self, claim_id: str, event_type: EventType, payload: dict | None = None

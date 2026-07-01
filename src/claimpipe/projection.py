@@ -12,9 +12,16 @@ from claimpipe.domain.models import Claim, ClaimMetadata, ClaimStatus
 # Legal transitions. Kept intentionally explicit so the machine is auditable and any illegal
 # jump is a loud failure, not silent corruption.
 ALLOWED: dict[ClaimStatus, set[ClaimStatus]] = {
-    ClaimStatus.RECEIVED: {ClaimStatus.OCR_RUNNING, ClaimStatus.FAILED},
+    # RECEIVED may jump straight to PERSISTED for claim types with no document/LLM stages
+    # (pipeline-as-config: stages are per-claim-type data, not code).
+    ClaimStatus.RECEIVED: {ClaimStatus.OCR_RUNNING, ClaimStatus.PERSISTED, ClaimStatus.FAILED},
     ClaimStatus.OCR_RUNNING: {ClaimStatus.OCR_DONE, ClaimStatus.FAILED},
-    ClaimStatus.OCR_DONE: {ClaimStatus.LLM_RUNNING, ClaimStatus.FAILED},
+    # OCR_DONE may skip LLM for types that only archive documents.
+    ClaimStatus.OCR_DONE: {
+        ClaimStatus.LLM_RUNNING,
+        ClaimStatus.PERSISTED,
+        ClaimStatus.FAILED,
+    },
     ClaimStatus.LLM_RUNNING: {
         ClaimStatus.LLM_DONE,
         ClaimStatus.PARTIAL_SUCCESS,

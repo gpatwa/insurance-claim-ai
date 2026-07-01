@@ -14,7 +14,10 @@ class SubmitClaimRequest(BaseModel):
 class SubmitClaimResponse(BaseModel):
     claim_id: str
     status: ClaimStatus
-    upload_url: str
+    claim_type: str = "generic-document"
+    stages: list[str] = []
+    # None for claim types whose pipeline has no document-upload stage
+    upload_url: str | None = None
     idempotent: bool = False
 
 

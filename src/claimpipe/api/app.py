@@ -17,6 +17,13 @@ from claimpipe.api.schemas import (
     SubmitClaimRequest,
     SubmitClaimResponse,
 )
+from claimpipe.claimtypes import (
+    ClaimTypeRegistry,
+    Stage,
+    UnknownClaimType,
+    default_registry,
+    validate_attributes,
+)
 from claimpipe.config import Settings
 from claimpipe.domain.events import EventType
 from claimpipe.domain.models import ClaimStatus
@@ -29,15 +36,29 @@ def _upload_url(settings: Settings, claim_id: str) -> str:
     return f"{settings.s3_endpoint_url}/{settings.s3_bucket}/{claim_id}/source.pdf"
 
 
-def create_app(*, store: EventStore, temporal_client: Client, settings: Settings) -> FastAPI:
+def create_app(
+    *,
+    store: EventStore,
+    temporal_client: Client,
+    settings: Settings,
+    registry: ClaimTypeRegistry | None = None,
+) -> FastAPI:
     app = FastAPI(title="claimpipe ingestion")
     app.state.store = store
     app.state.temporal_client = temporal_client
     app.state.settings = settings
+    app.state.registry = registry or default_registry()
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/claim-types")
+    async def list_claim_types(request: Request) -> dict:
+        reg: ClaimTypeRegistry = request.app.state.registry
+        return {
+            "claim_types": [reg.get(name).model_dump() for name in reg.names()],
+        }
 
     @app.post("/claims", response_model=SubmitClaimResponse, status_code=202)
     async def submit_claim(
@@ -48,6 +69,23 @@ def create_app(*, store: EventStore, temporal_client: Client, settings: Settings
         store: EventStore = request.app.state.store
         client: Client = request.app.state.temporal_client
         settings: Settings = request.app.state.settings
+        reg: ClaimTypeRegistry = request.app.state.registry
+
+        # Schema-driven intake: resolve the claim type and validate its attribute schema.
+        try:
+            defn = reg.get(req.metadata.claim_type)
+        except UnknownClaimType:
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown claim_type '{req.metadata.claim_type}'; "
+                f"known: {reg.names()}",
+            ) from None
+        errors = validate_attributes(defn, req.metadata.attributes)
+        if errors:
+            raise HTTPException(status_code=422, detail={"attribute_errors": errors})
+
+        stages = [str(s) for s in defn.stages]
+        has_upload = str(Stage.UPLOAD) in stages
 
         if idempotency_key:
             existing = await store.find_by_idempotency_key(idempotency_key)
@@ -55,7 +93,11 @@ def create_app(*, store: EventStore, temporal_client: Client, settings: Settings
                 return SubmitClaimResponse(
                     claim_id=existing.claim_id,
                     status=existing.status,
-                    upload_url=_upload_url(settings, existing.claim_id),
+                    claim_type=existing.metadata.claim_type,
+                    stages=stages,
+                    upload_url=(
+                        _upload_url(settings, existing.claim_id) if has_upload else None
+                    ),
                     idempotent=True,
                 )
 
@@ -66,16 +108,20 @@ def create_app(*, store: EventStore, temporal_client: Client, settings: Settings
             {"metadata": req.metadata.model_dump()},
             idempotency_key=idempotency_key,
         )
+        # Pipeline-as-config: pin the claim type's stage list into the workflow input, so
+        # later registry changes never affect in-flight claims.
         await client.start_workflow(
             ClaimWorkflow.run,
-            claim_id,
+            args=[claim_id, stages],
             id=claim_id,
             task_queue=settings.temporal_task_queue,
         )
         return SubmitClaimResponse(
             claim_id=claim_id,
             status=ClaimStatus.RECEIVED,
-            upload_url=_upload_url(settings, claim_id),
+            claim_type=defn.name,
+            stages=stages,
+            upload_url=_upload_url(settings, claim_id) if has_upload else None,
         )
 
     @app.post("/claims/{claim_id}/uploaded", status_code=202)
