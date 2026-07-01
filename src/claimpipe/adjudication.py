@@ -142,10 +142,29 @@ def default_rulesets() -> dict[str, RuleSet]:
         outcome=Decision.DENY,
         reason_code="EXCEEDS_LIMIT",
     )
+    # Reference-data-grounded rules (facts only present when a RefDataSource is wired).
+    # Coverage checks come before amount checks: an inactive policy is denied regardless.
+    policy_rules = [
+        Rule(
+            rule_id="deny-policy-inactive",
+            description="Policy is not active per the policy-admin system of record",
+            conditions=[Condition(field="policy_status", op="ne", value="active")],
+            outcome=Decision.DENY,
+            reason_code="POLICY_INACTIVE",
+        ),
+        Rule(
+            rule_id="pend-policy-not-found",
+            description="Claimed policy number is unknown to reference data",
+            conditions=[Condition(field="policy_found", op="eq", value=False)],
+            outcome=Decision.PEND,
+            reason_code="POLICY_NOT_FOUND",
+        ),
+    ]
     return {
         "generic-document": RuleSet(name="generic-document", rules=review_and_confidence),
         "auto-fnol": RuleSet(
-            name="auto-fnol", rules=[deny_over_limit, *review_and_confidence]
+            name="auto-fnol",
+            rules=[*policy_rules, deny_over_limit, *review_and_confidence],
         ),
         # Structured (e.g. EDI) claims: no model ran, so no confidence/escalation facts —
         # decide on the claim data alone; anything unusual still PENDs via fallthrough rules.

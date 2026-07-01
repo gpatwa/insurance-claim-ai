@@ -3,7 +3,7 @@
 [![CI](https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
-![tests](https://img.shields.io/badge/tests-33%20passing-brightgreen.svg)
+![tests](https://img.shields.io/badge/tests-65%20passing-brightgreen.svg)
 
 > **Cloud-agnostic claim-ingestion pipeline.** A PDF + JSON "claim" is logged → run through OCR →
 > scored by multiple LLM models (tiered routing) → persisted → the customer is notified by
@@ -91,6 +91,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M10** — Adjudication core (versioned decision tables → APPROVE/DENY/PEND + reason codes; rules decide, LLM prepares)
 - [x] **M11** — Human-in-the-loop review (REVIEW dormancy gate, work queue, reviewer verdict API, audit trail)
 - [x] **M12** — Intake & output adapters (FNOL / X12-style in via `/intake/{format}`; EOB + denial letter out via `/claims/{id}/documents/{format}`)
+- [x] **M13** — Reference data + multi-tenancy (policy-grounded adjudication facts; per-tenant registries/rule sets via `X-Tenant-ID`)
 
 ## Claim types (pipeline-as-config)
 
@@ -117,6 +118,12 @@ the rule set version, matched rule, and facts — an audit trail by construction
 verdict (`POST /claims/{id}/review`), which signals the workflow and overrides the PEND —
 with the reviewer recorded on the `REVIEW_COMPLETED` event. If nobody acts, the claim
 persists still-PEND: the system never decides on the human's behalf.
+
+**Reference data & tenancy:** adjudication facts are grounded in what the carrier *knows*
+(policy status via a `RefDataSource`), not just what the claimant *says* — an inactive policy
+denies regardless of the submission. Each tenant (`X-Tenant-ID`) gets its own claim-type
+registry and rule sets on one deployment; the `default` tenant keeps single-tenant setups
+zero-config.
 
 **Intake & output adapters:** external formats normalize into canonical claims via
 `POST /intake/{format}` (seeded: `fnol` carrier JSON, `x12-837` demo-grade EDI-shaped reader —

@@ -47,6 +47,11 @@ async def main() -> None:
     from claimpipe.agent import ClaimReviewAgent
 
     agent = ClaimReviewAgent(extractor=accuracy_model, critic=cost_model)
+    from claimpipe.refdata import InMemoryRefData
+    from claimpipe.tenancy import default_directory
+
+    refdata = InMemoryRefData()  # swap for the policy-admin adapter in deployment
+    tenants = default_directory()
     acts = ClaimActivities(
         store,
         object_store=obj,
@@ -56,6 +61,8 @@ async def main() -> None:
         agent=agent,
         confidence_threshold=settings.confidence_threshold,
         high_value_amount=settings.high_value_amount,
+        refdata=refdata,
+        tenants=tenants,
     )
     log.info("worker.starting", task_queue=settings.temporal_task_queue)
     worker = Worker(

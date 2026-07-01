@@ -45,6 +45,7 @@ class ClaimMetadata(BaseModel):
     customer_id: str = Field(min_length=1)
     callback_url: str = Field(min_length=1, description="Customer webhook endpoint")
     claim_type: str = "generic-document"
+    tenant_id: str = "default"
     schema_version: str = "v1"
     attributes: dict[str, object] = Field(default_factory=dict)
 

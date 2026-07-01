@@ -19,9 +19,11 @@ from claimpipe.domain.events import EventType
 from claimpipe.domain.models import ModelPrediction
 from claimpipe.eventstore import EventStore
 from claimpipe.llm import should_escalate
+from claimpipe.refdata import RefDataSource, enrich_facts
 
 if TYPE_CHECKING:  # avoid importing langgraph into the workflow sandbox
     from claimpipe.agent import ClaimReviewAgent
+    from claimpipe.tenancy import TenantDirectory
 
 
 @activity.defn
@@ -43,6 +45,8 @@ class ClaimActivities:
         confidence_threshold: float = 0.85,
         high_value_amount: float = 25000.0,
         rulesets: dict[str, RuleSet] | None = None,
+        refdata: RefDataSource | None = None,
+        tenants: TenantDirectory | None = None,
     ) -> None:
         self._store = store
         self._obj = object_store
@@ -53,6 +57,8 @@ class ClaimActivities:
         self._threshold = confidence_threshold
         self._high_value = high_value_amount
         self._rulesets = rulesets if rulesets is not None else default_rulesets()
+        self._refdata = refdata
+        self._tenants = tenants
 
     @activity.defn
     async def record_event(self, claim_id: str, event_type: str, payload: dict) -> None:
@@ -145,9 +151,19 @@ class ClaimActivities:
         }
         if preds:
             facts["confidence"] = max(p.confidence for p in preds)
+        # ground facts in reference data (policy status/limits) when a source is wired
+        facts = await enrich_facts(self._refdata, facts)
+
+        # Tenant-specific rule sets when a directory is wired; else the default sets.
+        rulesets = self._rulesets
+        if self._tenants is not None:
+            try:
+                rulesets = self._tenants.get(claim.metadata.tenant_id).rulesets
+            except Exception:  # noqa: BLE001 - unknown tenant → safe empty set → PEND
+                rulesets = {}
 
         # No rule set registered for the type → empty set → safe PEND (never auto-approve).
-        rule_set = self._rulesets.get(
+        rule_set = rulesets.get(
             claim.metadata.claim_type,
             RuleSet(name=claim.metadata.claim_type, version="unregistered", rules=[]),
         )
