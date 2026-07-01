@@ -1,0 +1,62 @@
+[project]
+name = "claimpipe"
+version = "0.1.0"
+description = "Cloud-agnostic claim-ingestion pipeline (self-hosted Temporal + LangGraph + Postgres + S3-adapter)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "gpatwa" }]
+dependencies = [
+    "temporalio>=1.8",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+]
+storage = [
+    "aioboto3>=13.0",
+]
+llm = [
+    "anthropic>=0.40",
+    "aiolimiter>=1.1",
+]
+agent = [
+    "langgraph>=0.2",
+]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claimpipe"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["claimpipe"]
+ignore_missing_imports = true
