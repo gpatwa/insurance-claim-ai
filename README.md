@@ -90,6 +90,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M9** — Pipeline-as-config engine (per-claim-type stage lists; lines of business are configuration, not code)
 - [x] **M10** — Adjudication core (versioned decision tables → APPROVE/DENY/PEND + reason codes; rules decide, LLM prepares)
 - [x] **M11** — Human-in-the-loop review (REVIEW dormancy gate, work queue, reviewer verdict API, audit trail)
+- [x] **M12** — Intake & output adapters (FNOL / X12-style in via `/intake/{format}`; EOB + denial letter out via `/claims/{id}/documents/{format}`)
 
 ## Claim types (pipeline-as-config)
 
@@ -104,6 +105,7 @@ REVIEW → PERSIST`.
 | `auto-fnol` | UPLOAD → OCR → LLM → ADJUDICATE → REVIEW → PERSIST | demo line: required attributes + limit rules |
 | `archive-document` | UPLOAD → OCR → PERSIST | OCR + store, no scoring/decision |
 | `metadata-only` | PERSIST | structured-data claim, no document |
+| `structured-claim` | ADJUDICATE → REVIEW → PERSIST | e.g. EDI: arrives structured, rules decide directly |
 
 **Adjudication:** deterministic, versioned decision tables (first match wins) decide
 `APPROVE / DENY / PEND` with reason codes — **rules decide, the LLM only prepares facts**.
@@ -115,6 +117,12 @@ the rule set version, matched rule, and facts — an audit trail by construction
 verdict (`POST /claims/{id}/review`), which signals the workflow and overrides the PEND —
 with the reviewer recorded on the `REVIEW_COMPLETED` event. If nobody acts, the claim
 persists still-PEND: the system never decides on the human's behalf.
+
+**Intake & output adapters:** external formats normalize into canonical claims via
+`POST /intake/{format}` (seeded: `fnol` carrier JSON, `x12-837` demo-grade EDI-shaped reader —
+the seam where a real clearinghouse adapter drops in), and decided claims render as outbound
+documents via `GET /claims/{id}/documents/{format}` (seeded: `eob` JSON remittance,
+`denial-letter`; adapters render, never decide).
 
 The resolved stage list is **pinned into the workflow input at submission** — registry changes
 never affect in-flight claims. Discover types at `GET /claim-types`.

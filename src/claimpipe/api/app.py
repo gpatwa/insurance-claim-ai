@@ -12,6 +12,8 @@ from uuid import uuid4
 from fastapi import FastAPI, Header, HTTPException, Request
 from temporalio.client import Client
 
+from claimpipe.adapters.intake import IntakeAdapter, IntakeError, default_intake_adapters
+from claimpipe.adapters.output import OutputAdapter, OutputError, default_output_adapters
 from claimpipe.api.schemas import (
     ClaimStatusResponse,
     ReviewRequest,
@@ -27,7 +29,7 @@ from claimpipe.claimtypes import (
 )
 from claimpipe.config import Settings
 from claimpipe.domain.events import EventType
-from claimpipe.domain.models import ClaimStatus
+from claimpipe.domain.models import ClaimMetadata, ClaimStatus
 from claimpipe.eventstore import EventStore
 from claimpipe.temporal.workflows import ClaimWorkflow
 
@@ -43,45 +45,34 @@ def create_app(
     temporal_client: Client,
     settings: Settings,
     registry: ClaimTypeRegistry | None = None,
+    intake_adapters: dict[str, IntakeAdapter] | None = None,
+    output_adapters: dict[str, OutputAdapter] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="claimpipe ingestion")
     app.state.store = store
     app.state.temporal_client = temporal_client
     app.state.settings = settings
     app.state.registry = registry or default_registry()
+    app.state.intake_adapters = (
+        intake_adapters if intake_adapters is not None else default_intake_adapters()
+    )
+    app.state.output_adapters = (
+        output_adapters if output_adapters is not None else default_output_adapters()
+    )
 
-    @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
-
-    @app.get("/claim-types")
-    async def list_claim_types(request: Request) -> dict:
-        reg: ClaimTypeRegistry = request.app.state.registry
-        return {
-            "claim_types": [reg.get(name).model_dump() for name in reg.names()],
-        }
-
-    @app.post("/claims", response_model=SubmitClaimResponse, status_code=202)
-    async def submit_claim(
-        req: SubmitClaimRequest,
-        request: Request,
-        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    async def _submit(
+        metadata: ClaimMetadata, idempotency_key: str | None
     ) -> SubmitClaimResponse:
-        store: EventStore = request.app.state.store
-        client: Client = request.app.state.temporal_client
-        settings: Settings = request.app.state.settings
-        reg: ClaimTypeRegistry = request.app.state.registry
-
-        # Schema-driven intake: resolve the claim type and validate its attribute schema.
+        """Shared submit path: resolve type, validate schema, emit, start workflow."""
+        reg: ClaimTypeRegistry = app.state.registry
         try:
-            defn = reg.get(req.metadata.claim_type)
+            defn = reg.get(metadata.claim_type)
         except UnknownClaimType:
             raise HTTPException(
                 status_code=422,
-                detail=f"unknown claim_type '{req.metadata.claim_type}'; "
-                f"known: {reg.names()}",
+                detail=f"unknown claim_type '{metadata.claim_type}'; known: {reg.names()}",
             ) from None
-        errors = validate_attributes(defn, req.metadata.attributes)
+        errors = validate_attributes(defn, metadata.attributes)
         if errors:
             raise HTTPException(status_code=422, detail={"attribute_errors": errors})
 
@@ -106,12 +97,12 @@ def create_app(
         await store.append(
             claim_id,
             EventType.CLAIM_RECEIVED,
-            {"metadata": req.metadata.model_dump()},
+            {"metadata": metadata.model_dump()},
             idempotency_key=idempotency_key,
         )
         # Pipeline-as-config: pin the claim type's stage list into the workflow input, so
         # later registry changes never affect in-flight claims.
-        await client.start_workflow(
+        await temporal_client.start_workflow(
             ClaimWorkflow.run,
             args=[claim_id, stages],
             id=claim_id,
@@ -124,6 +115,45 @@ def create_app(
             stages=stages,
             upload_url=_upload_url(settings, claim_id) if has_upload else None,
         )
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/claim-types")
+    async def list_claim_types(request: Request) -> dict:
+        reg: ClaimTypeRegistry = request.app.state.registry
+        return {
+            "claim_types": [reg.get(name).model_dump() for name in reg.names()],
+        }
+
+    @app.post("/claims", response_model=SubmitClaimResponse, status_code=202)
+    async def submit_claim(
+        req: SubmitClaimRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> SubmitClaimResponse:
+        return await _submit(req.metadata, idempotency_key)
+
+    @app.post("/intake/{adapter_name}", response_model=SubmitClaimResponse, status_code=202)
+    async def intake_submit(
+        adapter_name: str,
+        request: Request,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> SubmitClaimResponse:
+        """Format-specific intake: the adapter normalizes the raw body into a canonical
+        claim, then the shared submit path takes over."""
+        adapters: dict[str, IntakeAdapter] = request.app.state.intake_adapters
+        adapter = adapters.get(adapter_name)
+        if adapter is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown intake adapter '{adapter_name}'; known: {sorted(adapters)}",
+            )
+        try:
+            metadata = adapter.normalize(await request.body())
+        except IntakeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return await _submit(metadata, idempotency_key)
 
     @app.post("/claims/{claim_id}/uploaded", status_code=202)
     async def mark_uploaded(claim_id: str, request: Request) -> dict[str, str]:
@@ -181,6 +211,28 @@ def create_app(
         handle = client.get_workflow_handle(claim_id)
         await handle.signal(ClaimWorkflow.review_completed, req.model_dump())
         return {"claim_id": claim_id, "signal": "review_completed"}
+
+    @app.get("/claims/{claim_id}/documents/{adapter_name}")
+    async def render_document(claim_id: str, adapter_name: str, request: Request):
+        """Render the claim's outbound document (EOB, denial letter, ...) on demand."""
+        from fastapi.responses import Response
+
+        adapters: dict[str, OutputAdapter] = request.app.state.output_adapters
+        adapter = adapters.get(adapter_name)
+        if adapter is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown document format '{adapter_name}'; known: {sorted(adapters)}",
+            )
+        claim = await store.get(claim_id)
+        if claim is None:
+            raise HTTPException(status_code=404, detail="claim not found")
+        preds = await store.predictions(claim_id)
+        try:
+            body = adapter.render(claim, preds)
+        except OutputError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return Response(content=body, media_type=adapter.content_type)
 
     @app.get("/claims/{claim_id}/predictions")
     async def get_predictions(claim_id: str, request: Request) -> dict:

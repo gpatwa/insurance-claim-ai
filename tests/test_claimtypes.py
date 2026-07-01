@@ -77,6 +77,7 @@ def test_default_registry_seeds() -> None:
         "metadata-only",
         "archive-document",
         "auto-fnol",
+        "structured-claim",
     }
     assert reg.get("metadata-only").stages == [Stage.PERSIST]
 

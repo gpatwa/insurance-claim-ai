@@ -135,19 +135,37 @@ def default_rulesets() -> dict[str, RuleSet]:
             reason_code="AUTO_APPROVED",
         ),
     ]
+    deny_over_limit = Rule(
+        rule_id="deny-over-limit",
+        description="Claimed amount exceeds the policy line limit",
+        conditions=[Condition(field="amount", op="gt", value=100_000)],
+        outcome=Decision.DENY,
+        reason_code="EXCEEDS_LIMIT",
+    )
     return {
         "generic-document": RuleSet(name="generic-document", rules=review_and_confidence),
         "auto-fnol": RuleSet(
-            name="auto-fnol",
+            name="auto-fnol", rules=[deny_over_limit, *review_and_confidence]
+        ),
+        # Structured (e.g. EDI) claims: no model ran, so no confidence/escalation facts —
+        # decide on the claim data alone; anything unusual still PENDs via fallthrough rules.
+        "structured-claim": RuleSet(
+            name="structured-claim",
             rules=[
+                deny_over_limit,
                 Rule(
-                    rule_id="deny-over-limit",
-                    description="Claimed amount exceeds the policy line limit",
-                    conditions=[Condition(field="amount", op="gt", value=100_000)],
-                    outcome=Decision.DENY,
-                    reason_code="EXCEEDS_LIMIT",
+                    rule_id="pend-high-value",
+                    description="High-value structured claims get a human look",
+                    conditions=[Condition(field="amount", op="gte", value=25_000)],
+                    outcome=Decision.PEND,
+                    reason_code="REVIEW_REQUIRED",
                 ),
-                *review_and_confidence,
+                Rule(
+                    rule_id="auto-approve",
+                    description="Routine structured claims auto-approve",
+                    outcome=Decision.APPROVE,
+                    reason_code="AUTO_APPROVED",
+                ),
             ],
         ),
     }

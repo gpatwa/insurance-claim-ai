@@ -142,6 +142,14 @@ def default_registry() -> ClaimTypeRegistry:
     )
     reg.register(
         ClaimTypeDef(
+            name="structured-claim",
+            description="Structured claim (e.g. EDI): no document, rules adjudicate directly.",
+            attributes=[AttributeSpec(name="amount", type="number", required=True)],
+            stages=[Stage.ADJUDICATE, Stage.REVIEW, Stage.PERSIST],
+        )
+    )
+    reg.register(
+        ClaimTypeDef(
             name="archive-document",
             description="Document archival: OCR + store, no model scoring.",
             stages=[Stage.UPLOAD, Stage.OCR, Stage.PERSIST],

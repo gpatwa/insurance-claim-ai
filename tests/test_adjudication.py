@@ -97,12 +97,15 @@ def test_unmatched_facts_pend_never_approve() -> None:
 
 def test_default_rulesets_shape() -> None:
     sets = default_rulesets()
-    assert set(sets) == {"generic-document", "auto-fnol"}
-    # escalated claims pend for review under both
-    for rs in sets.values():
-        res = adjudicate(rs, {"escalated": True, "confidence": 0.99})
+    assert set(sets) == {"generic-document", "auto-fnol", "structured-claim"}
+    # escalated claims pend for review under the model-driven rule sets
+    for name in ("generic-document", "auto-fnol"):
+        res = adjudicate(sets[name], {"escalated": True, "confidence": 0.99})
         assert res.decision == Decision.PEND
         assert res.reason_codes == ["REVIEW_REQUIRED"]
+    # structured claims have no model facts: high value pends, routine approves
+    assert adjudicate(sets["structured-claim"], {"amount": 30_000}).decision == Decision.PEND
+    assert adjudicate(sets["structured-claim"], {"amount": 500}).decision == Decision.APPROVE
 
 
 # ---- end-to-end through the workflow ----------------------------------------------------
