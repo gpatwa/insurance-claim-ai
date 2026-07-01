@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from claimpipe.domain.models import ClaimMetadata, ClaimStatus
 
@@ -26,3 +26,11 @@ class ClaimStatusResponse(BaseModel):
     status: ClaimStatus
     decision: str | None = None
     reason_codes: list[str] = []
+
+
+class ReviewRequest(BaseModel):
+    """Human reviewer's verdict for a PENDed claim. Reviewers must decide — no re-PEND."""
+
+    decision: str = Field(pattern="^(APPROVE|DENY)$")
+    reason_code: str = "MANUAL_REVIEW"
+    reviewer: str = Field(min_length=1)

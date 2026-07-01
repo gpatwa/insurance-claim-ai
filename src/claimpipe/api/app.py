@@ -14,6 +14,7 @@ from temporalio.client import Client
 
 from claimpipe.api.schemas import (
     ClaimStatusResponse,
+    ReviewRequest,
     SubmitClaimRequest,
     SubmitClaimResponse,
 )
@@ -146,6 +147,40 @@ def create_app(
             decision=claim.decision,
             reason_codes=claim.reason_codes,
         )
+
+    @app.get("/review-queue")
+    async def review_queue(request: Request) -> dict:
+        """Work queue: adjudicated claims PENDing for a human reviewer."""
+        store: EventStore = request.app.state.store
+        pending = await store.list_pending_review()
+        return {
+            "pending": [
+                {
+                    "claim_id": c.claim_id,
+                    "claim_type": c.metadata.claim_type,
+                    "reason_codes": c.reason_codes,
+                    "attributes": c.metadata.attributes,
+                }
+                for c in pending
+            ]
+        }
+
+    @app.post("/claims/{claim_id}/review", status_code=202)
+    async def submit_review(claim_id: str, req: ReviewRequest, request: Request) -> dict:
+        """Reviewer's verdict for a PENDed claim — signals the workflow's REVIEW gate."""
+        store: EventStore = request.app.state.store
+        client: Client = request.app.state.temporal_client
+        claim = await store.get(claim_id)
+        if claim is None:
+            raise HTTPException(status_code=404, detail="claim not found")
+        if claim.decision != "PEND":
+            raise HTTPException(
+                status_code=409,
+                detail=f"claim is not pending review (decision={claim.decision})",
+            )
+        handle = client.get_workflow_handle(claim_id)
+        await handle.signal(ClaimWorkflow.review_completed, req.model_dump())
+        return {"claim_id": claim_id, "signal": "review_completed"}
 
     @app.get("/claims/{claim_id}/predictions")
     async def get_predictions(claim_id: str, request: Request) -> dict:

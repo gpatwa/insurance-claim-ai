@@ -16,7 +16,7 @@ from claimpipe.config import Settings
 from claimpipe.domain.models import ClaimStatus
 from claimpipe.eventstore import InMemoryEventStore
 from claimpipe.llm import route_and_predict, should_escalate
-from tests.helpers import META, TASK_QUEUE, make_worker
+from tests.helpers import META, TASK_QUEUE, make_worker, wait_for_pend
 
 
 def _client(app) -> httpx.AsyncClient:
@@ -99,14 +99,22 @@ async def test_e2e_low_confidence_escalates() -> None:
     async with await WorkflowEnvironment.start_time_skipping() as env:
         store = InMemoryEventStore()
         obj = InMemoryObjectStore()
-        cid = await _run(
+        settings = Settings(temporal_task_queue=TASK_QUEUE)
+        async with make_worker(
             env,
             store,
-            obj,
-            MockModelClient(name="cost", confidence=0.40),
-            MockModelClient(name="acc", confidence=0.99),
-            META,
-        )
+            obj_store=obj,
+            cost_model=MockModelClient(name="cost", confidence=0.40),
+            accuracy_model=MockModelClient(name="acc", confidence=0.99),
+        ):
+            app = create_app(store=store, temporal_client=env.client, settings=settings)
+            async with _client(app) as ac:
+                cid = (await ac.post("/claims", json={"metadata": META})).json()["claim_id"]
+                await obj.put(f"{cid}/source.pdf", b"%PDF sample")
+                await ac.post(f"/claims/{cid}/uploaded")
+                # escalated → PENDs at the REVIEW gate; observe without completing
+                await wait_for_pend(store, cid)
+
         preds = await store.predictions(cid)
         assert len(preds) == 2  # escalated to accuracy tier
         assert {p.model_name for p in preds} == {"cost", "acc"}

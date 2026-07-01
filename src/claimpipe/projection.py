@@ -90,6 +90,12 @@ def project(claim: Claim | None, event: DomainEvent) -> Claim:
         updates["decision"] = event.payload["decision"]
         updates["reason_codes"] = list(event.payload.get("reason_codes", []))
 
+    # Human review overrides the rules' PEND with the reviewer's decision (no status change:
+    # the claim stays ADJUDICATED; the reviewer + rationale live on the event for audit).
+    if event.type == EventType.REVIEW_COMPLETED:
+        updates["decision"] = event.payload["decision"]
+        updates["reason_codes"] = list(event.payload.get("reason_codes", []))
+
     new_status = _EVENT_STATUS.get(event.type)
     if new_status is not None and new_status != claim.status:
         if new_status not in ALLOWED.get(claim.status, set()):

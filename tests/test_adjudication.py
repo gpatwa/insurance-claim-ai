@@ -25,7 +25,7 @@ from claimpipe.api.app import create_app
 from claimpipe.config import Settings
 from claimpipe.domain.models import ClaimStatus
 from claimpipe.eventstore import InMemoryEventStore
-from tests.helpers import META, TASK_QUEUE, make_worker
+from tests.helpers import META, TASK_QUEUE, make_worker, wait_for_pend
 
 
 def _client(app) -> httpx.AsyncClient:
@@ -151,13 +151,22 @@ async def test_e2e_confident_claim_auto_approves() -> None:
 async def test_e2e_escalated_claim_pends_for_review() -> None:
     async with await WorkflowEnvironment.start_time_skipping() as env:
         store = InMemoryEventStore()
-        cid = await _submit_and_finish(
+        obj = InMemoryObjectStore()
+        settings = Settings(temporal_task_queue=TASK_QUEUE)
+        async with make_worker(
             env,
             store,
-            InMemoryObjectStore(),
-            MockModelClient(name="cost", confidence=0.40),  # below threshold → escalates
-            META,
-        )
+            obj_store=obj,
+            # below threshold → escalates → rules PEND (claim parks at the REVIEW gate)
+            cost_model=MockModelClient(name="cost", confidence=0.40),
+        ):
+            app = create_app(store=store, temporal_client=env.client, settings=settings)
+            async with _client(app) as ac:
+                cid = (await ac.post("/claims", json={"metadata": META})).json()["claim_id"]
+                await obj.put(f"{cid}/source.pdf", b"%PDF sample")
+                await ac.post(f"/claims/{cid}/uploaded")
+                await wait_for_pend(store, cid)
+
         claim = await store.get(cid)
         assert claim.decision == "PEND"
         assert claim.reason_codes == ["REVIEW_REQUIRED"]

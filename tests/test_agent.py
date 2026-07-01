@@ -15,7 +15,7 @@ from claimpipe.agent import ClaimReviewAgent
 from claimpipe.api.app import create_app
 from claimpipe.config import Settings
 from claimpipe.eventstore import InMemoryEventStore
-from tests.helpers import META, TASK_QUEUE, make_worker
+from tests.helpers import META, TASK_QUEUE, make_worker, wait_for_pend
 
 
 def _client(app) -> httpx.AsyncClient:
@@ -61,7 +61,8 @@ async def test_e2e_escalation_runs_agent() -> None:
                 cid = (await ac.post("/claims", json={"metadata": META})).json()["claim_id"]
                 await obj.put(f"{cid}/source.pdf", b"%PDF sample")
                 await ac.post(f"/claims/{cid}/uploaded")
-                assert await env.client.get_workflow_handle(cid).result() == cid
+                # escalated claims park at the REVIEW gate; observe PEND without completing
+                await wait_for_pend(store, cid)
 
                 preds = await store.predictions(cid)
                 assert len(preds) == 2

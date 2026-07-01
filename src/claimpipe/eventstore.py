@@ -17,7 +17,7 @@ from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 from claimpipe.domain.events import DomainEvent, EventType
-from claimpipe.domain.models import Claim, ModelPrediction
+from claimpipe.domain.models import Claim, ClaimStatus, ModelPrediction
 from claimpipe.projection import project
 
 
@@ -37,6 +37,7 @@ class EventStore(Protocol):
     async def events(self, claim_id: str) -> list[DomainEvent]: ...
     async def predictions(self, claim_id: str) -> list[ModelPrediction]: ...
     async def list_by_status(self, status: str) -> list[str]: ...
+    async def list_pending_review(self) -> list[Claim]: ...
 
     # outbox (read by the relay)
     async def fetch_unpublished(self, limit: int = 100) -> list[DomainEvent]: ...
@@ -95,6 +96,14 @@ class InMemoryEventStore:
 
     async def list_by_status(self, status: str) -> list[str]:
         return [cid for cid, c in self._claims.items() if str(c.status) == status]
+
+    async def list_pending_review(self) -> list[Claim]:
+        """Work queue: adjudicated claims whose decision is PEND (awaiting a human)."""
+        return [
+            c
+            for c in self._claims.values()
+            if c.decision == "PEND" and c.status == ClaimStatus.ADJUDICATED
+        ]
 
     async def find_by_idempotency_key(self, key: str) -> Claim | None:
         claim_id = self._idem.get(key)
@@ -157,11 +166,12 @@ class PostgresEventStore:
                 )
                 await conn.execute(
                     """INSERT INTO claims (claim_id, status, customer_id, callback_url,
-                                           metadata, ocr_ref, idempotency_key, created_at,
-                                           updated_at)
-                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                                           metadata, ocr_ref, decision, reason_codes,
+                                           idempotency_key, created_at, updated_at)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                        ON CONFLICT (claim_id) DO UPDATE
                        SET status=EXCLUDED.status, ocr_ref=EXCLUDED.ocr_ref,
+                           decision=EXCLUDED.decision, reason_codes=EXCLUDED.reason_codes,
                            updated_at=EXCLUDED.updated_at""",
                     claim_id,
                     str(new_claim.status),
@@ -169,6 +179,8 @@ class PostgresEventStore:
                     new_claim.metadata.callback_url,
                     json.dumps(new_claim.metadata.model_dump()),
                     new_claim.ocr_ref,
+                    new_claim.decision,
+                    json.dumps(new_claim.reason_codes),
                     idempotency_key,
                     new_claim.created_at,
                     new_claim.updated_at,
@@ -207,11 +219,16 @@ class PostgresEventStore:
         meta = row["metadata"]
         if isinstance(meta, str):
             meta = json.loads(meta)
+        codes = row["reason_codes"]
+        if isinstance(codes, str):
+            codes = json.loads(codes)
         return Claim(
             claim_id=row["claim_id"],
             status=row["status"],
             metadata=meta,
             ocr_ref=row["ocr_ref"],
+            decision=row["decision"],
+            reason_codes=codes or [],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -265,6 +282,13 @@ class PostgresEventStore:
         async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
             rows = await conn.fetch("SELECT claim_id FROM claims WHERE status=$1", status)
         return [r["claim_id"] for r in rows]
+
+    async def list_pending_review(self) -> list[Claim]:
+        async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
+            rows = await conn.fetch(
+                "SELECT claim_id FROM claims WHERE decision='PEND' AND status='ADJUDICATED'"
+            )
+            return [c for r in rows if (c := await self._get(conn, r["claim_id"]))]
 
     async def fetch_unpublished(self, limit: int = 100) -> list[DomainEvent]:
         async with self._pool.acquire() as conn:  # type: ignore[attr-defined]

@@ -61,11 +61,19 @@ class ClaimWorkflow:
         self._uploaded: bool = False
         self._pdf_key: str | None = None
         self._status: str = str(ClaimStatus.RECEIVED)
+        self._decision: str | None = None
+        self._review: dict | None = None
 
     @workflow.signal
     def pdf_uploaded(self, pdf_key: str) -> None:
         self._pdf_key = pdf_key
         self._uploaded = True
+
+    @workflow.signal
+    def review_completed(self, review: dict) -> None:
+        """Human reviewer's verdict for a PENDed claim:
+        {"decision": "APPROVE"|"DENY", "reason_code": str, "reviewer": str}."""
+        self._review = review
 
     @workflow.query
     def status(self) -> str:
@@ -127,13 +135,39 @@ class ClaimWorkflow:
 
         if stage == Stage.ADJUDICATE:
             # Deterministic rules decide (the event is emitted inside the activity).
-            await workflow.execute_activity_method(
+            self._decision = await workflow.execute_activity_method(
                 ClaimActivities.run_adjudication,
                 claim_id,
                 start_to_close_timeout=timedelta(minutes=1),
                 retry_policy=_STD_RETRY,
             )
             self._status = str(ClaimStatus.ADJUDICATED)
+            return True
+
+        if stage == Stage.REVIEW:
+            # Only PEND decisions need a human; everything else passes straight through.
+            if self._decision != "PEND":
+                return True
+            # Dormancy gate: wait (durably, scale-to-zero) for the reviewer's verdict.
+            try:
+                await workflow.wait_condition(
+                    lambda: self._review is not None, timeout=timedelta(days=30)
+                )
+            except TimeoutError:
+                # Unreviewed after the window: persist still-PEND rather than deciding
+                # on the human's behalf.
+                return True
+            assert self._review is not None
+            await self._emit(
+                claim_id,
+                EventType.REVIEW_COMPLETED,
+                {
+                    "decision": self._review["decision"],
+                    "reason_codes": [self._review.get("reason_code", "MANUAL_REVIEW")],
+                    "reviewer": self._review.get("reviewer", "unknown"),
+                },
+            )
+            self._decision = self._review["decision"]
             return True
 
         if stage == Stage.PERSIST:

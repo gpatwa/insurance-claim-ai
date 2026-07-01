@@ -89,18 +89,19 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M8** — Claim-type registry + schema-driven intake (per-type attribute schemas validated at the API edge)
 - [x] **M9** — Pipeline-as-config engine (per-claim-type stage lists; lines of business are configuration, not code)
 - [x] **M10** — Adjudication core (versioned decision tables → APPROVE/DENY/PEND + reason codes; rules decide, LLM prepares)
+- [x] **M11** — Human-in-the-loop review (REVIEW dormancy gate, work queue, reviewer verdict API, audit trail)
 
 ## Claim types (pipeline-as-config)
 
 A **claim type** declares, as data, the attribute schema its metadata must satisfy and the
 pipeline stages the engine executes — so adding a line of business is registering a
 definition, not writing a workflow. Stage vocabulary: `UPLOAD → OCR → LLM → ADJUDICATE →
-PERSIST`.
+REVIEW → PERSIST`.
 
 | Seeded type | Stages | Purpose |
 |---|---|---|
-| `generic-document` | UPLOAD → OCR → LLM → ADJUDICATE → PERSIST | full pipeline (default) |
-| `auto-fnol` | UPLOAD → OCR → LLM → ADJUDICATE → PERSIST | demo line: required attributes + limit rules |
+| `generic-document` | UPLOAD → OCR → LLM → ADJUDICATE → REVIEW → PERSIST | full pipeline (default) |
+| `auto-fnol` | UPLOAD → OCR → LLM → ADJUDICATE → REVIEW → PERSIST | demo line: required attributes + limit rules |
 | `archive-document` | UPLOAD → OCR → PERSIST | OCR + store, no scoring/decision |
 | `metadata-only` | PERSIST | structured-data claim, no document |
 
@@ -108,6 +109,12 @@ PERSIST`.
 `APPROVE / DENY / PEND` with reason codes — **rules decide, the LLM only prepares facts**.
 Unmatched claims PEND (never auto-approve by fallthrough), and every decision event records
 the rule set version, matched rule, and facts — an audit trail by construction.
+
+**Human-in-the-loop review:** PEND decisions park at a durable **REVIEW dormancy gate**
+(scale-to-zero, 30-day window). Reviewers work a queue (`GET /review-queue`) and post a
+verdict (`POST /claims/{id}/review`), which signals the workflow and overrides the PEND —
+with the reviewer recorded on the `REVIEW_COMPLETED` event. If nobody acts, the claim
+persists still-PEND: the system never decides on the human's behalf.
 
 The resolved stage list is **pinned into the workflow input at submission** — registry changes
 never affect in-flight claims. Discover types at `GET /claim-types`.

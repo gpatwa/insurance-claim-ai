@@ -22,6 +22,25 @@ META = {
 }
 
 
+async def wait_for_pend(store: EventStore, claim_id: str) -> None:
+    """Poll (real time — no timer skipping) until adjudication PENDs the claim.
+
+    Escalated-claim tests must not await the workflow result to observe PEND: the pipeline
+    parks at the REVIEW dormancy gate, and awaiting the result would skip the 30-day review
+    window instead of leaving the claim pending.
+    """
+    import asyncio
+
+    from claimpipe.domain.models import ClaimStatus
+
+    for _ in range(200):
+        claim = await store.get(claim_id)
+        if claim and claim.decision == "PEND" and claim.status == ClaimStatus.ADJUDICATED:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("claim never reached PEND/ADJUDICATED")
+
+
 class FakeWebhook:
     """Records deliveries; fails the first `fail_times` calls."""
 

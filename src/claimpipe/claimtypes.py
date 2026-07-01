@@ -24,6 +24,7 @@ class Stage(StrEnum):
     OCR = "OCR"  # extract text from the uploaded document
     LLM = "LLM"  # tiered model routing (+ agent escalation)
     ADJUDICATE = "ADJUDICATE"  # deterministic rules decide APPROVE/DENY/PEND + reasons
+    REVIEW = "REVIEW"  # dormancy gate: PEND decisions wait for a human reviewer
     PERSIST = "PERSIST"  # checkpoint: predictions/record final, triggers notify consumer
 
 
@@ -56,11 +57,14 @@ class ClaimTypeDef(BaseModel):
             raise InvalidPipeline(f"{self.name}: OCR requires UPLOAD before it")
         if Stage.LLM in self.stages and Stage.OCR not in self.stages:
             raise InvalidPipeline(f"{self.name}: LLM requires OCR before it")
+        if Stage.REVIEW in self.stages and Stage.ADJUDICATE not in self.stages:
+            raise InvalidPipeline(f"{self.name}: REVIEW requires ADJUDICATE before it")
         order = {s: i for i, s in enumerate(self.stages)}
         for earlier, later in [
             (Stage.UPLOAD, Stage.OCR),
             (Stage.OCR, Stage.LLM),
             (Stage.LLM, Stage.ADJUDICATE),
+            (Stage.ADJUDICATE, Stage.REVIEW),
         ]:
             if earlier in order and later in order and order[earlier] > order[later]:
                 raise InvalidPipeline(f"{self.name}: {earlier} must precede {later}")
@@ -119,7 +123,14 @@ def default_registry() -> ClaimTypeRegistry:
             name=DEFAULT_CLAIM_TYPE,
             description="PDF + JSON claim: OCR, tiered LLM scoring, adjudicate, persist.",
             attributes=[AttributeSpec(name="amount", type="number", required=False)],
-            stages=[Stage.UPLOAD, Stage.OCR, Stage.LLM, Stage.ADJUDICATE, Stage.PERSIST],
+            stages=[
+                Stage.UPLOAD,
+                Stage.OCR,
+                Stage.LLM,
+                Stage.ADJUDICATE,
+                Stage.REVIEW,
+                Stage.PERSIST,
+            ],
         )
     )
     reg.register(
@@ -145,7 +156,14 @@ def default_registry() -> ClaimTypeRegistry:
                 AttributeSpec(name="incident_date", type="string", required=True),
                 AttributeSpec(name="amount", type="number", required=True),
             ],
-            stages=[Stage.UPLOAD, Stage.OCR, Stage.LLM, Stage.ADJUDICATE, Stage.PERSIST],
+            stages=[
+                Stage.UPLOAD,
+                Stage.OCR,
+                Stage.LLM,
+                Stage.ADJUDICATE,
+                Stage.REVIEW,
+                Stage.PERSIST,
+            ],
         )
     )
     return reg
