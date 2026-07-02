@@ -33,3 +33,6 @@ notifier:
 
 api:
 	uv run python -m claimpipe.api.main
+
+smoke:
+	uv run python scripts/e2e_smoke.py

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "claimpipe"
 
     # Postgres (application DB — separate from Temporal's persistence store)
-    postgres_dsn: str = "postgresql://claimpipe:claimpipe@localhost:5432/claimpipe"
+    postgres_dsn: str = "postgresql://claimpipe:claimpipe@localhost:5433/claimpipe"
 
     # Object store (S3-compatible; MinIO locally)
     s3_endpoint_url: str | None = "http://localhost:9000"
@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "claims"
+
+    # Ingestion API
+    api_port: int = 8000
 
     # OCR (blackbox)
     ocr_base_url: str = "http://localhost:8080"
@@ -37,6 +40,11 @@ class Settings(BaseSettings):
     # LLM tiered routing (see design doc: cost-tier first, escalate on low confidence)
     confidence_threshold: float = 0.85
     high_value_amount: float = 25000.0
+
+    # Dev / smoke-test mode: mock LLMs (no API keys needed) + refdata seeded from a JSON
+    # file of PolicyRecord objects. Never set in production.
+    use_mock_llm: bool = False
+    refdata_file: str | None = None
 
     # Webhook notification
     webhook_hmac_secret: str = "dev-secret-change-me"

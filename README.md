@@ -9,7 +9,7 @@
 > scored by multiple LLM models (tiered routing) → persisted → the customer is notified by
 > webhook. Portable, self-hosted, and **event-sourced**.
 
-🌐 **[Landing page](https://gpatwa.github.io/insurance-claim-ai)** · 🧭 [Design](docs/DESIGN.md) · 🚀 [Deploy](docs/DEPLOY.md)
+🌐 **[Landing page](https://gpatwa.github.io/insurance-claim-ai)** · 🧭 [Design](docs/DESIGN.md) · 🚀 [Deploy](docs/DEPLOY.md) · ✅ [Verify](docs/VERIFY.md)
 
 ## Architecture
 
@@ -66,7 +66,8 @@ Design rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
 ```bash
 make install          # uv sync (all extras + dev)
 make test             # hermetic tests (Temporal in-process test env — no Docker needed)
-make up               # bring up Temporal + Postgres + MinIO locally
+make up               # bring up Temporal + Postgres + MinIO + Redpanda locally
+make smoke            # full-stack E2E smoke: real services + seeded reference data
 make worker           # run the Temporal worker
 make down             # tear down
 ```

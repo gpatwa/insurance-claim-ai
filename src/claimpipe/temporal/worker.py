@@ -38,19 +38,40 @@ async def main() -> None:
         secret_key=settings.s3_secret_key,
     )
     ocr = MockOCRClient()  # swap for the real blackbox OCR adapter in deployment
-    cost_model = AnthropicModelClient(
-        model="claude-haiku-4-5", name="claude-haiku-4-5", version="cost"
-    )
-    accuracy_model = AnthropicModelClient(
-        model="claude-opus-4-8", name="claude-opus-4-8", version="accuracy"
-    )
-    from claimpipe.agent import ClaimReviewAgent
 
-    agent = ClaimReviewAgent(extractor=accuracy_model, critic=cost_model)
-    from claimpipe.refdata import InMemoryRefData
+    agent = None
+    if settings.use_mock_llm:
+        # Dev/smoke mode: deterministic models, no API keys, no agent graph.
+        from claimpipe.adapters.model_client import MockModelClient
+
+        cost_model: object = MockModelClient(name="mock-cost", confidence=0.95)
+        accuracy_model: object = MockModelClient(
+            name="mock-accuracy", version="acc", confidence=0.99
+        )
+        log.info("worker.mock_llm_enabled")
+    else:
+        cost_model = AnthropicModelClient(
+            model="claude-haiku-4-5", name="claude-haiku-4-5", version="cost"
+        )
+        accuracy_model = AnthropicModelClient(
+            model="claude-opus-4-8", name="claude-opus-4-8", version="accuracy"
+        )
+        from claimpipe.agent import ClaimReviewAgent
+
+        agent = ClaimReviewAgent(extractor=accuracy_model, critic=cost_model)
+
+    from claimpipe.refdata import InMemoryRefData, PolicyRecord
     from claimpipe.tenancy import default_directory
 
     refdata = InMemoryRefData()  # swap for the policy-admin adapter in deployment
+    if settings.refdata_file:
+        import json
+
+        with open(settings.refdata_file, encoding="utf-8") as fh:  # noqa: ASYNC230 - one-time startup read
+            records = json.load(fh)
+        for rec in records:
+            refdata.add(PolicyRecord(**rec))
+        log.info("worker.refdata_seeded", count=len(records), file=settings.refdata_file)
     tenants = default_directory()
     acts = ClaimActivities(
         store,

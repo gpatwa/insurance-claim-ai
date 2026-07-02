@@ -1,4 +1,9 @@
-"""Real API entrypoint: builds Postgres event store + Temporal client, serves with uvicorn."""
+"""Real API entrypoint: builds Postgres event store + Temporal client, serves with uvicorn.
+
+Everything runs on ONE event loop: asyncpg connections are bound to the loop they were
+created on, so the pool must be built inside the same loop uvicorn serves from (building it
+in a separate startup loop breaks every request with "attached to a different loop").
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ from claimpipe.config import get_settings
 from claimpipe.eventstore import PostgresEventStore
 
 
-async def _build():
+async def serve() -> None:
     import asyncpg
 
     settings = get_settings()
@@ -20,14 +25,15 @@ async def _build():
         settings.temporal_address, namespace=settings.temporal_namespace
     )
     pool = await asyncpg.create_pool(settings.postgres_dsn)
-    return create_app(
+    app = create_app(
         store=PostgresEventStore(pool), temporal_client=client, settings=settings
     )
+    config = uvicorn.Config(app, host="0.0.0.0", port=settings.api_port, log_level="info")
+    await uvicorn.Server(config).serve()
 
 
 def main() -> None:
-    app = asyncio.get_event_loop().run_until_complete(_build())
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    asyncio.run(serve())
 
 
 if __name__ == "__main__":

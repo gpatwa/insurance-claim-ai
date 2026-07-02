@@ -23,5 +23,8 @@ uv.lock
 *.tfstate
 *.tfstate.*
 
+# smoke test artifacts
+smoke-logs/
+
 # OS
 .DS_Store
