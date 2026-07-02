@@ -37,7 +37,10 @@ What it does:
 3. Spawns the four real service entrypoints (worker, api, relay, notifier) as
    subprocesses — logs land in `smoke-logs/`.
 4. Runs a local webhook receiver and verifies **HMAC signatures** on every delivery.
-5. Runs three refdata-grounded scenarios and asserts at every layer:
+5. Exercises the **customer front door**: rejects anonymous submits (401), submits with a
+   submitter API key, uploads the PDF through the **real presigned URL** (plain HTTP PUT,
+   no S3 credentials), and proves role separation (submitter key blocked from reviewing).
+6. Runs three refdata-grounded scenarios and asserts at every layer:
 
 | Scenario | Reference data says | Expected outcome |
 |---|---|---|
@@ -45,10 +48,10 @@ What it does:
 | B: lapsed policy | policy **lapsed** | DENY `POLICY_INACTIVE` → denial letter renders |
 | C: unknown policy | **not found** | PEND `POLICY_NOT_FOUND` → review queue → human APPROVE → webhook |
 
-6. Verifies the **event log** has full per-claim history in Postgres and the **outbox is
+7. Verifies the **event log** has full per-claim history in Postgres and the **outbox is
    fully relayed** to Kafka.
 
-Exit code 0 + `19/19 checks passed` = the deployed wiring works, not just the logic.
+Exit code 0 + `21/21 checks passed` = the deployed wiring works, not just the logic.
 
 ### Why both layers
 

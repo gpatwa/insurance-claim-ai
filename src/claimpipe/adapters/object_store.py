@@ -21,6 +21,10 @@ class ObjectStore(Protocol):
 
     async def exists(self, key: str) -> bool: ...
 
+    async def presigned_put(self, key: str, expires_s: int = 900) -> str:
+        """Time-limited URL the client can PUT the object to directly."""
+        ...
+
 
 class InMemoryObjectStore:
     """Test/dev implementation. Not for production."""
@@ -40,6 +44,9 @@ class InMemoryObjectStore:
 
     async def exists(self, key: str) -> bool:
         return key in self._store
+
+    async def presigned_put(self, key: str, expires_s: int = 900) -> str:
+        return f"mem://{self._bucket}/presigned/{key}?expires={expires_s}"
 
 
 class S3ObjectStore:
@@ -92,3 +99,11 @@ class S3ObjectStore:
                 return True
             except ClientError:
                 return False
+
+    async def presigned_put(self, key: str, expires_s: int = 900) -> str:
+        async with self._session() as s3:
+            return await s3.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": self._bucket, "Key": key},
+                ExpiresIn=expires_s,
+            )

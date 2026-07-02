@@ -12,8 +12,10 @@ import asyncio
 import uvicorn
 from temporalio.client import Client
 
+from claimpipe.adapters.object_store import S3ObjectStore
 from claimpipe.api.app import create_app
 from claimpipe.config import get_settings
+from claimpipe.customers import default_customers, load_customers_file
 from claimpipe.eventstore import PostgresEventStore
 
 
@@ -25,8 +27,24 @@ async def serve() -> None:
         settings.temporal_address, namespace=settings.temporal_namespace
     )
     pool = await asyncpg.create_pool(settings.postgres_dsn)
+    obj = S3ObjectStore(
+        bucket=settings.s3_bucket,
+        endpoint_url=settings.s3_endpoint_url,
+        region=settings.s3_region,
+        access_key=settings.s3_access_key,
+        secret_key=settings.s3_secret_key,
+    )
+    customers = (
+        load_customers_file(settings.customers_file)
+        if settings.customers_file
+        else default_customers()
+    )
     app = create_app(
-        store=PostgresEventStore(pool), temporal_client=client, settings=settings
+        store=PostgresEventStore(pool),
+        temporal_client=client,
+        settings=settings,
+        object_store=obj,
+        customers=customers,
     )
     config = uvicorn.Config(app, host="0.0.0.0", port=settings.api_port, log_level="info")
     await uvicorn.Server(config).serve()

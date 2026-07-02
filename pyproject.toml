@@ -65,6 +65,10 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom: Depends()/Header() in argument defaults is correct.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header"]
+
 [tool.mypy]
 python_version = "3.12"
 packages = ["claimpipe"]

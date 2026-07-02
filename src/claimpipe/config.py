@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     # file of PolicyRecord objects. Never set in production.
     use_mock_llm: bool = False
     refdata_file: str | None = None
+    # Optional production customer registry (JSON w/ hashed keys); default = dev keys
+    customers_file: str | None = None
 
     # Webhook notification
     webhook_hmac_secret: str = "dev-secret-change-me"

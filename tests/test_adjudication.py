@@ -29,7 +29,12 @@ from tests.helpers import META, TASK_QUEUE, make_worker, wait_for_pend
 
 
 def _client(app) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    # dev-integration key (submit + review) — see claimpipe.customers.DEV_KEYS
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"X-API-Key": "ck_dev_all_01"},
+    )
 
 
 # ---- pure rule engine -------------------------------------------------------------------

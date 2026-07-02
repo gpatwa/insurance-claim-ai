@@ -42,6 +42,10 @@ HOOK_URL = f"http://127.0.0.1:{HOOK_PORT}/hook"
 PG_DSN = "postgresql://claimpipe:claimpipe@localhost:5433/claimpipe"
 HMAC_SECRET = "dev-secret-change-me"
 
+# predefined dev customers (see claimpipe.customers.DEV_KEYS)
+SUBMITTER = {"X-API-Key": "ck_lakeside_clearing_01"}
+REVIEWER = {"X-API-Key": "ck_payer_reviewer_01"}
+
 SEED_POLICIES = [
     {"policy_number": "POL-ACTIVE", "status": "active", "line": "auto", "limit": 50000},
     {"policy_number": "POL-DEAD", "status": "lapsed", "line": "auto"},
@@ -121,22 +125,6 @@ async def ensure_bucket() -> None:
             print("  · bucket 'claims' exists")
 
 
-async def put_pdf(claim_id: str) -> None:
-    import aioboto3
-
-    session = aioboto3.Session()
-    async with session.client(
-        "s3",
-        endpoint_url="http://localhost:9000",
-        region_name="us-east-1",
-        aws_access_key_id="minioadmin",
-        aws_secret_access_key="minioadmin",
-    ) as s3:
-        await s3.put_object(
-            Bucket="claims", Key=f"{claim_id}/source.pdf", Body=b"%PDF-1.7 smoke claim"
-        )
-
-
 # ------------------------------------------------------------------ webhook receiver
 
 RECEIVED: list[dict] = []
@@ -211,23 +199,40 @@ async def submit_fnol(ac: httpx.AsyncClient, policy: str, amount: float) -> str:
         "estimatedAmount": amount,
         "reporter": {"id": f"smoke-{policy}", "callbackUrl": HOOK_URL},
     }
-    r = await ac.post(f"{API}/intake/fnol", content=json.dumps(fnol).encode())
+    r = await ac.post(
+        f"{API}/intake/fnol", content=json.dumps(fnol).encode(), headers=SUBMITTER
+    )
     assert r.status_code == 202, f"submit failed: {r.status_code} {r.text}"
-    claim_id = r.json()["claim_id"]
-    await put_pdf(claim_id)
-    r = await ac.post(f"{API}/claims/{claim_id}/uploaded")
+    body = r.json()
+    claim_id = body["claim_id"]
+    # REAL presigned upload: plain HTTP PUT straight to MinIO — no S3 SDK, no credentials
+    put = await ac.put(body["upload_url"], content=b"%PDF-1.7 smoke claim")
+    assert put.status_code == 200, f"presigned PUT failed: {put.status_code} {put.text}"
+    r = await ac.post(f"{API}/claims/{claim_id}/uploaded", headers=SUBMITTER)
     assert r.status_code == 202
     return claim_id
 
 
-async def poll_claim(ac: httpx.AsyncClient, claim_id: str, want: dict, desc: str) -> dict:
+async def poll_claim(
+    ac: httpx.AsyncClient,
+    claim_id: str,
+    decision: str,
+    statuses: set[str] = frozenset({"PERSISTED", "NOTIFIED"}),
+    desc: str = "",
+) -> dict:
+    """Wait until the claim carries `decision` and a post-decision status.
+
+    NOTIFIED is accepted alongside PERSISTED: the notifier consumes CLAIM_PERSISTED off
+    Kafka within milliseconds, so demanding exactly PERSISTED is a race the poller loses.
+    """
+
     async def _try():
-        body = (await ac.get(f"{API}/claims/{claim_id}")).json()
-        if all(body.get(k) == v for k, v in want.items()):
+        body = (await ac.get(f"{API}/claims/{claim_id}", headers=SUBMITTER)).json()
+        if body.get("decision") == decision and body.get("status") in statuses:
             return body
         return None
 
-    return await poll(_try, desc=f"{desc} (want {want})")
+    return await poll(_try, desc=f"{desc} (want decision={decision})")
 
 
 # ------------------------------------------------------------------ scenarios
@@ -235,14 +240,14 @@ async def poll_claim(ac: httpx.AsyncClient, claim_id: str, want: dict, desc: str
 
 async def scenario_a(ac: httpx.AsyncClient) -> None:
     print("\nScenario A — active policy, routine amount → APPROVE")
+    anon = await ac.post(f"{API}/claims", json={"metadata": {}})
+    check("A: unauthenticated submit rejected (401)", anon.status_code == 401)
     cid = await submit_fnol(ac, "POL-ACTIVE", 1200.0)
-    body = await poll_claim(
-        ac, cid, {"status": "PERSISTED", "decision": "APPROVE"}, "A persisted"
-    )
+    body = await poll_claim(ac, cid, "APPROVE", desc="A decided")
     check("A: decision APPROVE", body["decision"] == "APPROVE")
     check("A: reason AUTO_APPROVED", body["reason_codes"] == ["AUTO_APPROVED"])
 
-    eob = (await ac.get(f"{API}/claims/{cid}/documents/eob")).json()
+    eob = (await ac.get(f"{API}/claims/{cid}/documents/eob", headers=SUBMITTER)).json()
     check("A: EOB payable == claimed", eob["payable_amount"] == 1200.0, str(eob))
 
     hook = await wait_webhook(cid, "A webhook")
@@ -257,11 +262,11 @@ async def scenario_a(ac: httpx.AsyncClient) -> None:
 async def scenario_b(ac: httpx.AsyncClient) -> None:
     print("\nScenario B — lapsed policy → DENY POLICY_INACTIVE (refdata outranks claimant)")
     cid = await submit_fnol(ac, "POL-DEAD", 900.0)
-    body = await poll_claim(ac, cid, {"status": "PERSISTED", "decision": "DENY"}, "B persisted")
+    body = await poll_claim(ac, cid, "DENY", desc="B decided")
     check("B: decision DENY", body["decision"] == "DENY")
     check("B: reason POLICY_INACTIVE", body["reason_codes"] == ["POLICY_INACTIVE"])
 
-    letter = await ac.get(f"{API}/claims/{cid}/documents/denial-letter")
+    letter = await ac.get(f"{API}/claims/{cid}/documents/denial-letter", headers=SUBMITTER)
     check("B: denial letter renders", letter.status_code == 200)
     check("B: letter cites reason", "POLICY_INACTIVE" in letter.text)
 
@@ -272,23 +277,32 @@ async def scenario_b(ac: httpx.AsyncClient) -> None:
 async def scenario_c(ac: httpx.AsyncClient) -> None:
     print("\nScenario C — unknown policy → PEND → human review → APPROVE")
     cid = await submit_fnol(ac, "POL-GHOST", 800.0)
-    body = await poll_claim(ac, cid, {"decision": "PEND"}, "C pended")
+    body = await poll_claim(
+        ac, cid, "PEND", statuses={"ADJUDICATED"}, desc="C pended"
+    )
     check("C: pends POLICY_NOT_FOUND", body["reason_codes"] == ["POLICY_NOT_FOUND"])
 
-    queue = (await ac.get(f"{API}/review-queue")).json()["pending"]
+    queue = (await ac.get(f"{API}/review-queue", headers=REVIEWER)).json()["pending"]
     check("C: appears in review queue", cid in [c["claim_id"] for c in queue])
+
+    # role separation is real: the submitter key cannot review
+    forbidden = await ac.post(
+        f"{API}/claims/{cid}/review",
+        json={"decision": "APPROVE", "reviewer": "x"},
+        headers=SUBMITTER,
+    )
+    check("C: submitter key blocked from reviewing (403)", forbidden.status_code == 403)
 
     r = await ac.post(
         f"{API}/claims/{cid}/review",
         json={"decision": "APPROVE", "reason_code": "VERIFIED_OK", "reviewer": "smoke@test"},
+        headers=REVIEWER,
     )
     check("C: review accepted", r.status_code == 202)
 
-    body = await poll_claim(
-        ac, cid, {"status": "PERSISTED", "decision": "APPROVE"}, "C persisted"
-    )
+    body = await poll_claim(ac, cid, "APPROVE", desc="C decided")
     check("C: human APPROVE wins", body["reason_codes"] == ["VERIFIED_OK"])
-    queue = (await ac.get(f"{API}/review-queue")).json()["pending"]
+    queue = (await ac.get(f"{API}/review-queue", headers=REVIEWER)).json()["pending"]
     check("C: queue drained", cid not in [c["claim_id"] for c in queue])
 
     hook = await wait_webhook(cid, "C webhook")

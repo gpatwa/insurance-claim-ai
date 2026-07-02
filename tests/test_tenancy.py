@@ -18,6 +18,7 @@ from claimpipe.adjudication import Decision, Rule, RuleSet, adjudicate, default_
 from claimpipe.api.app import create_app
 from claimpipe.claimtypes import ClaimTypeDef, ClaimTypeRegistry, Stage
 from claimpipe.config import Settings
+from claimpipe.customers import Customer, default_customers
 from claimpipe.domain.models import ClaimStatus
 from claimpipe.eventstore import InMemoryEventStore
 from claimpipe.refdata import InMemoryRefData, PolicyRecord, enrich_facts
@@ -33,7 +34,12 @@ _FNOL = {
 
 
 def _client(app) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    # dev-integration key (submit + review) — see claimpipe.customers.DEV_KEYS
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers={"X-API-Key": "ck_dev_all_01"},
+    )
 
 
 # ---- reference data ---------------------------------------------------------------------
@@ -117,39 +123,53 @@ def _acme_directory() -> TenantDirectory:
 
 
 async def test_tenant_scoped_claim_types_and_submission() -> None:
+    """Tenant is derived from the API key — a header can't select someone else's tenant."""
     async with await WorkflowEnvironment.start_time_skipping() as env:
         store = InMemoryEventStore()
         tenants = _acme_directory()
+        # customers: one key per tenant, plus a key mapped to a missing tenant
+        customers = default_customers()
+        customers.register(
+            "ck_acme_01",
+            Customer(customer_id="acme-portal", tenant_id="acme", roles={"submit", "review"}),
+        )
+        customers.register(
+            "ck_ghost_01", Customer(customer_id="ghost-co", tenant_id="ghost")
+        )
         settings = Settings(temporal_task_queue=TASK_QUEUE)
         async with make_worker(env, store, tenants=tenants):
             app = create_app(
-                store=store, temporal_client=env.client, settings=settings, tenants=tenants
+                store=store,
+                temporal_client=env.client,
+                settings=settings,
+                tenants=tenants,
+                customers=customers,
             )
+            acme_hdr = {"X-API-Key": "ck_acme_01"}
             async with _client(app) as ac:
-                # tenant catalogs differ
-                acme_types = (
-                    await ac.get("/claim-types", headers={"X-Tenant-ID": "acme"})
-                ).json()
+                # tenant catalogs differ, selected by the KEY not a header
+                acme_types = (await ac.get("/claim-types", headers=acme_hdr)).json()
+                assert acme_types["tenant"] == "acme"
                 assert [t["name"] for t in acme_types["claim_types"]] == ["acme-quick"]
-                default_types = (await ac.get("/claim-types")).json()
+                default_types = (await ac.get("/claim-types")).json()  # dev key → default
                 assert "generic-document" in [
                     t["name"] for t in default_types["claim_types"]
                 ]
 
-                # acme's type is invalid for the default tenant…
+                # acme's type is invalid for a default-tenant key…
                 meta = {**META, "claim_type": "acme-quick"}
                 assert (await ac.post("/claims", json={"metadata": meta})).status_code == 422
 
-                # …and unknown tenants are rejected outright
+                # …a key mapped to an unconfigured tenant is rejected outright…
                 r = await ac.post(
-                    "/claims", json={"metadata": meta}, headers={"X-Tenant-ID": "ghost"}
+                    "/claims",
+                    json={"metadata": meta},
+                    headers={"X-API-Key": "ck_ghost_01"},
                 )
                 assert r.status_code == 404
 
-                # for acme it submits, runs acme's rule set, and completes
-                r = await ac.post(
-                    "/claims", json={"metadata": meta}, headers={"X-Tenant-ID": "acme"}
-                )
+                # …and for the acme key it submits, runs acme's rule set, and completes
+                r = await ac.post("/claims", json={"metadata": meta}, headers=acme_hdr)
                 assert r.status_code == 202
                 claim_id = r.json()["claim_id"]
                 assert r.json()["stages"] == ["ADJUDICATE", "PERSIST"]
@@ -157,6 +177,7 @@ async def test_tenant_scoped_claim_types_and_submission() -> None:
                 assert await env.client.get_workflow_handle(claim_id).result() == claim_id
                 claim = await store.get(claim_id)
                 assert claim.metadata.tenant_id == "acme"
+                assert claim.metadata.customer_id == "acme-portal"  # stamped from the key
                 assert claim.status == ClaimStatus.PERSISTED
                 assert claim.decision == "APPROVE"
                 assert claim.reason_codes == ["ACME_OK"]
@@ -185,7 +206,3 @@ async def test_review_queue_is_tenant_scoped() -> None:
 
                 mine = (await ac.get("/review-queue")).json()
                 assert [c["claim_id"] for c in mine["pending"]] == [claim_id]
-                # another tenant sees an empty queue (unknown tenant → 404)
-                assert (
-                    await ac.get("/review-queue", headers={"X-Tenant-ID": "ghost"})
-                ).status_code == 404
