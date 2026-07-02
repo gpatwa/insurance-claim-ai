@@ -112,3 +112,14 @@ def test_keys_are_stored_hashed() -> None:
     # …but the registry holds only hashes (no plaintext keys anywhere)
     assert "ck_dev_all_01" not in str(vars(reg))
     assert hash_key("ck_dev_all_01") in reg._by_key_hash  # noqa: SLF001
+
+async def test_portal_page_served() -> None:
+    """The portal page itself is public; its API calls carry the user's key."""
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        app = _app(env, InMemoryEventStore())
+        async with _anon(app) as ac:
+            r = await ac.get("/portal")
+            assert r.status_code == 200
+            assert "text/html" in r.headers["content-type"]
+            assert "claimpipe portal" in r.text
+            assert "X-API-Key" in r.text  # the page authenticates via the front door

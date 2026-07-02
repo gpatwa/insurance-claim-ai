@@ -1,0 +1,4 @@
+[
+  {"policy_number": "POL-ACTIVE", "status": "active", "line": "auto", "limit": 50000},
+  {"policy_number": "POL-DEAD", "status": "lapsed", "line": "auto"}
+]

@@ -3,7 +3,7 @@
 [![CI](https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/gpatwa/insurance-claim-ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
-![tests](https://img.shields.io/badge/tests-70%20passing-brightgreen.svg)
+![tests](https://img.shields.io/badge/tests-71%20passing-brightgreen.svg)
 
 > **Cloud-agnostic claim-ingestion pipeline.** A PDF + JSON "claim" is logged → run through OCR →
 > scored by multiple LLM models (tiered routing) → persisted → the customer is notified by
@@ -68,6 +68,7 @@ make install          # uv sync (all extras + dev)
 make test             # hermetic tests (Temporal in-process test env — no Docker needed)
 make up               # bring up Temporal + Postgres + MinIO + Redpanda locally
 make smoke            # full-stack E2E smoke: real services + seeded reference data
+make portal           # dev worker + API (mock LLM, seeded refdata) → http://localhost:8123/portal
 make worker           # run the Temporal worker
 make down             # tear down
 ```
@@ -94,6 +95,7 @@ Each milestone is independently end-to-end tested and pushed.
 - [x] **M12** — Intake & output adapters (FNOL / X12-style in via `/intake/{format}`; EOB + denial letter out via `/claims/{id}/documents/{format}`)
 - [x] **M13** — Reference data + multi-tenancy (policy-grounded adjudication facts; per-tenant registries/rule sets)
 - [x] **M14** — Customer front door (API-key auth → customer/tenant/roles, claim ownership, real presigned upload URLs)
+- [x] **M15** — Portal UI (`/portal`): schema-driven claim form, presigned drag-in upload, live status + documents, reviewer queue
 
 ## Claim types (pipeline-as-config)
 
@@ -128,6 +130,12 @@ gate access: `submit` (claims in/out, own claims only) vs `review` (the tenant's
 Submitters get a **real presigned PUT URL** (15-min TTL) to upload documents directly to
 object storage. Keys are stored hashed; predefined dev keys live in `claimpipe/customers.py`
 (`ck_dev_all_01` etc.) — production loads hashed keys via `CLAIMPIPE_CUSTOMERS_FILE`.
+
+**Portal UI** (`GET /portal`): a self-contained page served by the API — no build toolchain.
+Enter an API key to connect (the key decides what you see): submitters get a **schema-driven
+claim form** (attribute fields generated from the claim type's spec), document upload via the
+**presigned URL**, a live status timeline, and EOB/denial-letter downloads; reviewer keys get
+the pending queue with Approve/Deny. Run locally with `make portal`.
 
 **Reference data & tenancy:** adjudication facts are grounded in what the carrier *knows*
 (policy status via a `RefDataSource`), not just what the claimant *says* — an inactive policy

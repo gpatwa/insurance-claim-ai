@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "portal",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/dev_portal.sh"],
+      "port": 8123
+    }
+  ]
+}

@@ -14,9 +14,11 @@ schema, append CLAIM_RECEIVED, start the durable workflow (workflow_id = claim_i
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from temporalio.client import Client
 
 from claimpipe.adapters.intake import IntakeAdapter, IntakeError, default_intake_adapters
@@ -49,6 +51,10 @@ from claimpipe.temporal.workflows import ClaimWorkflow
 from claimpipe.tenancy import TenantDirectory, UnknownTenant, default_directory
 
 UPLOAD_URL_TTL_S = 900  # 15 minutes to PUT the document
+
+# Self-contained portal page (submitter + reviewer UI). Served as static HTML — the page
+# itself is public; every API call it makes carries the user's X-API-Key.
+_PORTAL_HTML = (Path(__file__).parent / "static" / "portal.html").read_text(encoding="utf-8")
 
 
 def create_app(
@@ -202,6 +208,10 @@ def create_app(
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/portal", response_class=HTMLResponse)
+    async def portal() -> str:
+        return _PORTAL_HTML
 
     @app.get("/claim-types")
     async def list_claim_types(customer: Customer = Depends(require_customer)) -> dict:

@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>claimpipe portal</title>
+<style>
+  :root {
+    --bg:#0b1020; --card:#161d33; --line:#263154; --fg:#e8ecf6; --muted:#9aa6c4;
+    --accent:#6ea8ff; --green:#7cf1c8; --red:#ff8a8a; --amber:#ffd479; --chip:#1e2742;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:24px 20px 80px; }
+  h1 { font-size:26px; margin:8px 0 2px; } h1 .a { color:var(--green); }
+  .sub { color:var(--muted); font-size:14px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:18px; margin-bottom:16px; }
+  label { display:block; font-size:12.5px; color:var(--muted); margin:10px 0 4px; }
+  input,select { width:100%; padding:9px 11px; border-radius:8px; border:1px solid var(--line);
+    background:#0d1428; color:var(--fg); font-size:14px; }
+  input:focus,select:focus { outline:none; border-color:var(--accent); }
+  button { padding:9px 16px; border-radius:8px; border:1px solid var(--line);
+    background:linear-gradient(180deg,#3f6fd6,#2f57b5); color:#fff; font-weight:600;
+    cursor:pointer; font-size:14px; }
+  button.ghost { background:var(--chip); }
+  button.deny { background:linear-gradient(180deg,#c0504d,#9e3f3c); }
+  button:disabled { opacity:.45; cursor:default; }
+  .row { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:160px; }
+  .tabs { display:flex; gap:8px; margin:18px 0 14px; }
+  .tab { padding:8px 16px; border-radius:999px; background:var(--chip);
+    border:1px solid var(--line); cursor:pointer; font-weight:600; font-size:14px; }
+  .tab.on { border-color:var(--accent); color:var(--accent); }
+  .chip { display:inline-block; padding:3px 10px; border-radius:999px; background:var(--chip);
+    border:1px solid var(--line); font-size:12px; font-weight:700; }
+  .chip.APPROVE { color:var(--green); } .chip.DENY { color:var(--red); }
+  .chip.PEND { color:var(--amber); }
+  .claim { border-top:1px solid var(--line); padding:12px 0; }
+  .claim .id { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted); }
+  .muted { color:var(--muted); font-size:13px; }
+  .err { color:var(--red); font-size:13px; margin-top:8px; min-height:18px; }
+  .ok { color:var(--green); }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  pre { background:#0a0f1f; border:1px solid var(--line); border-radius:8px; padding:10px;
+    font-size:12px; overflow:auto; max-height:280px; }
+  .hidden { display:none; }
+  .doc-btns { display:flex; gap:8px; margin-top:6px; }
+  .doc-btns button { font-size:12.5px; padding:6px 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="a">claim</span>pipe portal</h1>
+  <div class="sub">Submit claims, upload documents, track decisions — or work the review queue.</div>
+
+  <!-- connect -->
+  <div class="card" id="connect-card">
+    <div class="row">
+      <div style="flex:3">
+        <label>API key (identifies you: customer, tenant, roles)</label>
+        <input id="apikey" placeholder="e.g. ck_acme_submitter_01 / ck_payer_reviewer_01" />
+      </div>
+      <div style="flex:0"><button onclick="connect()">Connect</button></div>
+    </div>
+    <div class="err" id="connect-err"></div>
+    <div class="muted" id="whoami"></div>
+  </div>
+
+  <div id="main" class="hidden">
+    <div class="tabs">
+      <div class="tab on" id="tab-submit" onclick="showTab('submit')">Submit claims</div>
+      <div class="tab" id="tab-review" onclick="showTab('review')">Review queue</div>
+    </div>
+
+    <!-- ============ submitter ============ -->
+    <div id="pane-submit">
+      <div class="card">
+        <h3 style="margin:0 0 4px">New claim</h3>
+        <div class="row">
+          <div>
+            <label>Claim type</label>
+            <select id="claimtype" onchange="renderAttrs()"></select>
+          </div>
+          <div>
+            <label>Webhook callback URL</label>
+            <input id="callback" value="http://127.0.0.1:8099/hook" />
+          </div>
+        </div>
+        <div id="attrs"></div>
+        <div style="margin-top:14px"><button onclick="submitClaim()">Submit claim</button></div>
+        <div class="err" id="submit-err"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 4px">My claims <span class="muted">(this session)</span></h3>
+        <div id="claims"><div class="muted">Nothing submitted yet.</div></div>
+      </div>
+    </div>
+
+    <!-- ============ reviewer ============ -->
+    <div id="pane-review" class="hidden">
+      <div class="card">
+        <h3 style="margin:0 0 4px">Pending review
+          <button class="ghost" style="float:right;font-size:12.5px" onclick="loadQueue()">Refresh</button></h3>
+        <div id="queue"><div class="muted">Loading…</div></div>
+        <div class="err" id="review-err"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let KEY = sessionStorage.getItem("claimpipe_key") || "";
+let TYPES = [];
+let CLAIMS = JSON.parse(sessionStorage.getItem("claimpipe_claims") || "[]");
+
+const $ = (id) => document.getElementById(id);
+const api = (path, opts = {}) =>
+  fetch(path, { ...opts, headers: { "X-API-Key": KEY, ...(opts.headers || {}) } });
+
+async function connect() {
+  KEY = $("apikey").value.trim();
+  $("connect-err").textContent = "";
+  const r = await api("/claim-types");
+  if (r.status === 401) { $("connect-err").textContent = "Invalid API key."; return; }
+  if (!r.ok) { $("connect-err").textContent = `Error ${r.status}`; return; }
+  const body = await r.json();
+  sessionStorage.setItem("claimpipe_key", KEY);
+  TYPES = body.claim_types;
+  $("whoami").innerHTML =
+    `Connected · tenant <b>${body.tenant}</b> · ${TYPES.length} claim types available`;
+  $("main").classList.remove("hidden");
+  $("claimtype").innerHTML = TYPES.map(
+    (t) => `<option value="${t.name}">${t.name} — ${t.description}</option>`).join("");
+  renderAttrs(); renderClaims(); loadQueue();
+}
+
+function currentType() { return TYPES.find((t) => t.name === $("claimtype").value); }
+
+function renderAttrs() {
+  const t = currentType();
+  if (!t) return;
+  const stages = t.stages.join(" → ");
+  let html = `<div class="muted" style="margin-top:8px">Pipeline: ${stages}</div>`;
+  if (t.attributes.length) {
+    html += '<div class="row">' + t.attributes.map((a) => `
+      <div><label>${a.name}${a.required ? " *" : ""} <span class="muted">(${a.type})</span></label>
+      <input data-attr="${a.name}" data-type="${a.type}" /></div>`).join("") + "</div>";
+  }
+  $("attrs").innerHTML = html;
+}
+
+async function submitClaim() {
+  $("submit-err").textContent = "";
+  const t = currentType();
+  const attributes = {};
+  for (const el of document.querySelectorAll("[data-attr]")) {
+    if (el.value === "") continue;
+    attributes[el.dataset.attr] = el.dataset.type === "number" ? Number(el.value)
+      : el.dataset.type === "boolean" ? el.value === "true" : el.value;
+  }
+  const metadata = { customer_id: "portal", callback_url: $("callback").value,
+    claim_type: t.name, attributes };
+  const r = await api("/claims", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ metadata }) });
+  const body = await r.json();
+  if (!r.ok) {
+    $("submit-err").textContent = typeof body.detail === "string"
+      ? body.detail : JSON.stringify(body.detail);
+    return;
+  }
+  CLAIMS.unshift({ claim_id: body.claim_id, claim_type: body.claim_type,
+    upload_url: body.upload_url, uploaded: false });
+  sessionStorage.setItem("claimpipe_claims", JSON.stringify(CLAIMS));
+  renderClaims(); pollSoon();
+}
+
+async function uploadDoc(claimId, inputId) {
+  const file = $(inputId).files[0];
+  if (!file) return;
+  const c = CLAIMS.find((x) => x.claim_id === claimId);
+  // presigned PUT straight to object storage — no credentials in the browser
+  const put = await fetch(c.upload_url, { method: "PUT", body: file });
+  if (!put.ok) { alert(`Upload failed: HTTP ${put.status}`); return; }
+  await api(`/claims/${claimId}/uploaded`, { method: "POST" });
+  c.uploaded = true;
+  sessionStorage.setItem("claimpipe_claims", JSON.stringify(CLAIMS));
+  renderClaims(); pollSoon();
+}
+
+async function openDoc(claimId, kind) {
+  const r = await api(`/claims/${claimId}/documents/${kind}`);
+  const text = await r.text();
+  if (!r.ok) { alert(JSON.parse(text).detail); return; }
+  const w = window.open("", "_blank");
+  w.document.write(`<pre style="font:13px ui-monospace,Menlo,monospace;white-space:pre-wrap">${
+    text.replace(/</g, "&lt;")}</pre>`);
+}
+
+function renderClaims() {
+  if (!CLAIMS.length) { $("claims").innerHTML = '<div class="muted">Nothing submitted yet.</div>'; return; }
+  $("claims").innerHTML = CLAIMS.map((c) => {
+    const st = c.status || "RECEIVED";
+    const dec = c.decision ? `<span class="chip ${c.decision}">${c.decision}</span>
+      <span class="muted">${(c.reason_codes || []).join(", ")}</span>` : "";
+    const needsUpload = c.upload_url && !c.uploaded;
+    const upload = needsUpload
+      ? `<div class="doc-btns"><input type="file" id="f-${c.claim_id}" style="width:auto" />
+         <button onclick="uploadDoc('${c.claim_id}','f-${c.claim_id}')">Upload document</button></div>`
+      : "";
+    const docs = c.decision
+      ? `<div class="doc-btns"><button class="ghost" onclick="openDoc('${c.claim_id}','eob')">EOB</button>
+         ${c.decision === "DENY"
+           ? `<button class="ghost" onclick="openDoc('${c.claim_id}','denial-letter')">Denial letter</button>` : ""}
+         </div>`
+      : "";
+    return `<div class="claim">
+      <span class="chip">${st}</span> ${dec}
+      <span class="muted">· ${c.claim_type}</span>
+      <div class="id">${c.claim_id}</div>${upload}${docs}</div>`;
+  }).join("");
+}
+
+async function refreshClaims() {
+  for (const c of CLAIMS) {
+    const r = await api(`/claims/${c.claim_id}`);
+    if (r.ok) Object.assign(c, await r.json());
+  }
+  sessionStorage.setItem("claimpipe_claims", JSON.stringify(CLAIMS));
+  renderClaims();
+}
+
+let pollTimer = null;
+function pollSoon() { clearInterval(pollTimer); pollTimer = setInterval(refreshClaims, 2000); }
+
+// ---------------- reviewer ----------------
+async function loadQueue() {
+  const r = await api("/review-queue");
+  if (r.status === 403) {
+    $("queue").innerHTML = '<div class="muted">This key does not have the review role.</div>';
+    return;
+  }
+  if (!r.ok) { $("queue").innerHTML = `<div class="err">Error ${r.status}</div>`; return; }
+  const { pending } = await r.json();
+  if (!pending.length) { $("queue").innerHTML = '<div class="muted">Queue is empty. 🎉</div>'; return; }
+  $("queue").innerHTML = `<table><tr><th>Claim</th><th>Type</th><th>Reasons</th>
+    <th>Facts</th><th>Verdict</th></tr>` + pending.map((c) => `
+    <tr><td class="id">${c.claim_id.slice(0, 8)}…</td><td>${c.claim_type}</td>
+    <td>${c.reason_codes.join(", ")}</td>
+    <td><pre style="max-height:90px;margin:0">${JSON.stringify(c.attributes, null, 1)}</pre></td>
+    <td><input id="rr-${c.claim_id}" placeholder="reason code" style="margin-bottom:6px" />
+      <div class="doc-btns">
+        <button onclick="review('${c.claim_id}','APPROVE')">Approve</button>
+        <button class="deny" onclick="review('${c.claim_id}','DENY')">Deny</button>
+      </div></td></tr>`).join("") + "</table>";
+}
+
+async function review(claimId, decision) {
+  $("review-err").textContent = "";
+  const reason = $(`rr-${claimId}`).value.trim() || "MANUAL_REVIEW";
+  const r = await api(`/claims/${claimId}/review`, { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, reason_code: reason, reviewer: "portal-reviewer" }) });
+  if (!r.ok) { $("review-err").textContent = JSON.stringify((await r.json()).detail); return; }
+  setTimeout(loadQueue, 800);
+}
+
+function showTab(name) {
+  $("pane-submit").classList.toggle("hidden", name !== "submit");
+  $("pane-review").classList.toggle("hidden", name !== "review");
+  $("tab-submit").classList.toggle("on", name === "submit");
+  $("tab-review").classList.toggle("on", name === "review");
+  if (name === "review") loadQueue();
+}
+
+// auto-reconnect if a key is stored
+if (KEY) { $("apikey").value = KEY; connect(); }
+pollSoon();
+</script>
+</body>
+</html>

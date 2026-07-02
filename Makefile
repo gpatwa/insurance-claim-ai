@@ -36,3 +36,6 @@ api:
 
 smoke:
 	uv run python scripts/e2e_smoke.py
+
+portal:
+	bash scripts/dev_portal.sh
